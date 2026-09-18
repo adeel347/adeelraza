@@ -7,11 +7,41 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="wide")
 
 # ------------------------------------------------------------------------------
-# RESPONSIVE CSS & COLOR-CODED BUTTON STYLING
+# 1. MOBILE BROWSER NATIVE BACK BUTTON INTERCEPTION & UNSAVED CHANGES HANDLER
+# ------------------------------------------------------------------------------
+# Intercepts the phone's physical/swipe back button so it updates URL hash instead of closing
+components.html("""
+<script>
+    const parentWin = window.parent;
+    
+    // Prevent accidental tab closes
+    parentWin.addEventListener('beforeunload', (event) => {
+        event.preventDefault();
+        event.returnValue = '';
+    });
+
+    // Handle physical / browser back button without exiting the app
+    if (!parentWin.history.state || parentWin.history.state.page !== 'trading_app') {
+        parentWin.history.pushState({ page: 'trading_app', step: 1 }, '', '');
+    }
+
+    parentWin.onpopstate = function(event) {
+        // When user swipes/hits phone back button, keep them in-app and trigger history back
+        parentWin.history.pushState({ page: 'trading_app', step: 2 }, '', '');
+        const backBtn = parentWin.document.querySelector('button[kind="secondary"]:has-text("Back")') ||
+                        parentWin.document.querySelector('button:has-text("⬅️ Back")');
+        if (backBtn) {
+            backBtn.click();
+        }
+    };
+</script>
+""", height=0)
+
+# ------------------------------------------------------------------------------
+# 2. COLOR-CODED BUTTON STYLES
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Metric Cards */
     .metric-card {
         background: #1e293b;
         border-radius: 10px;
@@ -52,9 +82,8 @@ st.markdown("""
         font-weight: bold !important;
         height: 3.5rem !important;
     }
-    /* Grey Edit & Setting Buttons */
-    div[data-testid="stButton"] button:has-text("✏️ Edit"),
-    div[data-testid="stButton"] button:has-text("🔑 Change Password") {
+    /* Grey Edit Button */
+    div[data-testid="stButton"] button:has-text("✏️ Edit") {
         background-color: #64748b !important;
         color: white !important;
         border: none !important;
@@ -62,7 +91,7 @@ st.markdown("""
         height: 3.5rem !important;
     }
 
-    /* Automatic Responsive Layout: Hide Desktop-only modules on mobile (<768px) */
+    /* Auto Responsive: Hides desktop-specific analytics on narrow mobile screens (<768px) */
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -71,18 +100,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Unsaved changes browser prompt
-components.html("""
-<script>
-    window.parent.addEventListener('beforeunload', (event) => {
-        event.preventDefault();
-        event.returnValue = '';
-    });
-</script>
-""", height=0)
-
 # ------------------------------------------------------------------------------
-# DATABASE CONNECTION
+# 3. DATABASE CLIENT
 # ------------------------------------------------------------------------------
 @st.cache_resource
 def get_supabase() -> Client:
@@ -97,7 +116,7 @@ except Exception as e:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# STATE MANAGEMENT
+# 4. NAVIGATION STACK & STATE MANAGEMENT
 # ------------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -107,15 +126,44 @@ if "market" not in st.session_state:
     st.session_state.market = None
 if "current_page" not in st.session_state:
     st.session_state.current_page = "MAIN_MENU"
+if "nav_stack" not in st.session_state:
+    # History stack stores previous (market, current_page) tuples
+    st.session_state.nav_stack = []
 if "auth_view" not in st.session_state:
     st.session_state.auth_view = "LOGIN"
 
+def navigate_to(page, market=None):
+    """Pushes the current state into the history stack and opens the target page."""
+    current_state = (st.session_state.market, st.session_state.current_page)
+    st.session_state.nav_stack.append(current_state)
+    if market is not None:
+        st.session_state.market = market
+    st.session_state.current_page = page
+    st.rerun()
+
+def go_back():
+    """Pops the last visited screen from the stack and restores it."""
+    if st.session_state.nav_stack:
+        prev_market, prev_page = st.session_state.nav_stack.pop()
+        st.session_state.market = prev_market
+        st.session_state.current_page = prev_page
+    else:
+        # Fallback to home selection
+        st.session_state.market = None
+        st.session_state.current_page = "MAIN_MENU"
+    st.rerun()
+
 # ------------------------------------------------------------------------------
-# AUTHENTICATION (Login, Forgot Password)
+# 5. AUTHENTICATION SCREENS (LOGIN / FORGOT PASSWORD)
 # ------------------------------------------------------------------------------
 if not st.session_state.authenticated:
-    _, auth_box, _ = st.columns([1, 1.3, 1])
+    # Top bar on unauthenticated screens
+    top_c1, top_c2 = st.columns([8, 2])
+    with top_c2:
+        st.button("🔐 Log In", disabled=True, use_container_width=True)
 
+    st.write("")
+    _, auth_box, _ = st.columns([1, 1.4, 1])
     with auth_box:
         if st.session_state.auth_view == "LOGIN":
             st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal Login</h2>", unsafe_allow_html=True)
@@ -131,6 +179,7 @@ if not st.session_state.authenticated:
                             st.session_state.user_email = res.user.email
                             st.session_state.market = None
                             st.session_state.current_page = "MAIN_MENU"
+                            st.session_state.nav_stack = []
                             st.rerun()
                     except Exception as e:
                         st.error(f"Sign in failed: {str(e)}")
@@ -144,11 +193,11 @@ if not st.session_state.authenticated:
             st.write("Enter your registered email address to receive password reset instructions.")
             with st.form("forgot_form"):
                 reset_email = st.text_input("Email Address")
-                reset_submit = st.form_submit_button("Send Password Reset Email", use_container_width=True)
+                reset_submit = st.form_submit_button("Send Recovery Email", use_container_width=True)
                 if reset_submit:
                     try:
                         supabase.auth.reset_password_for_email(reset_email)
-                        st.success("Recovery instructions sent to your email address.")
+                        st.success("Recovery instructions sent to your email.")
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
 
@@ -159,54 +208,111 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# PERSISTENT HEADER (Home & Logout at All Pages)
+# 6. GLOBAL PERSISTENT HEADER (Present at all authenticated pages)
 # ------------------------------------------------------------------------------
-h_col1, h_col2, h_col3 = st.columns([2, 5, 2])
-with h_col1:
-    if st.button("🏠 Home", use_container_width=True):
-        st.session_state.market = None
-        st.session_state.current_page = "MAIN_MENU"
-        st.rerun()
+is_home_page = (st.session_state.market is None)
 
-with h_col2:
-    badge = "🇵🇰 Pakistani Stocks" if st.session_state.market == "PK" else ("🌐 International Stocks" if st.session_state.market == "INTL" else "Market Selection")
-    st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:18px; margin-top:8px;'>{badge}</div>", unsafe_allow_html=True)
-
-with h_col3:
-    if st.button("🚪 Logout", use_container_width=True):
-        supabase.auth.sign_out()
-        st.session_state.authenticated = False
-        st.session_state.user_email = ""
-        st.session_state.market = None
-        st.session_state.current_page = "MAIN_MENU"
-        st.rerun()
+if is_home_page:
+    # On Home Page: Home | Title | Change Password | Logout
+    col_home, col_mid, col_pw, col_out = st.columns([1.5, 4.5, 2, 1.5])
+    with col_home:
+        if st.button("🏠 Home", use_container_width=True):
+            st.session_state.market = None
+            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.nav_stack = []
+            st.rerun()
+    with col_mid:
+        st.markdown("<div style='text-align:center; font-weight:bold; font-size:18px; margin-top:8px;'>Select Investment Market</div>", unsafe_allow_html=True)
+    with col_pw:
+        if st.button("🔑 Change Password", use_container_width=True):
+            navigate_to("CHANGE_PW")
+    with col_out:
+        if st.button("🚪 Logout", use_container_width=True):
+            supabase.auth.sign_out()
+            st.session_state.authenticated = False
+            st.session_state.user_email = ""
+            st.session_state.market = None
+            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.nav_stack = []
+            st.rerun()
+else:
+    # On Subpages: Home | Back | Market Title | Login (Active indicator) | Logout
+    col_home, col_back, col_mid, col_logstat, col_out = st.columns([1.2, 1.2, 4.2, 1.6, 1.4])
+    with col_home:
+        if st.button("🏠 Home", use_container_width=True):
+            st.session_state.market = None
+            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.nav_stack = []
+            st.rerun()
+    with col_back:
+        if st.button("⬅️ Back", use_container_width=True):
+            go_back()
+    with col_mid:
+        badge = "🇵🇰 Pakistani Stocks" if st.session_state.market == "PK" else "🌐 International Stocks"
+        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:18px; margin-top:8px;'>{badge}</div>", unsafe_allow_html=True)
+    with col_logstat:
+        st.button("🔐 Logged In", disabled=True, use_container_width=True)
+    with col_out:
+        if st.button("🚪 Logout", use_container_width=True):
+            supabase.auth.sign_out()
+            st.session_state.authenticated = False
+            st.session_state.user_email = ""
+            st.session_state.market = None
+            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.nav_stack = []
+            st.rerun()
 
 st.divider()
 
 # ------------------------------------------------------------------------------
-# LEVEL 1: MARKET SELECTION SCREEN
+# 7. CHANGE PASSWORD VIEW (When opened from Home)
+# ------------------------------------------------------------------------------
+if st.session_state.current_page == "CHANGE_PW":
+    st.header("🔑 Change Password")
+    with st.form("change_pw_form"):
+        st.write(f"Logged in user: **{st.session_state.user_email}**")
+        new_pw = st.text_input("New Password", type="password")
+        conf_pw = st.text_input("Confirm New Password", type="password")
+        submit_pw = st.form_submit_button("Update Password")
+
+        if submit_pw:
+            if not new_pw or len(new_pw) < 6:
+                st.error("Password must be at least 6 characters long.")
+            elif new_pw != conf_pw:
+                st.error("Passwords do not match.")
+            else:
+                try:
+                    supabase.auth.update_user({"password": new_pw})
+                    st.success("✅ Password updated successfully! Please re-login on next visit.")
+                except Exception as e:
+                    st.error(f"Failed to update password: {str(e)}")
+
+    if st.button("⬅️ Return to Home"):
+        st.session_state.market = None
+        st.session_state.current_page = "MAIN_MENU"
+        st.rerun()
+    st.stop()
+
+# ------------------------------------------------------------------------------
+# 8. HOME MARKET SELECTOR (Pakistani vs International)
 # ------------------------------------------------------------------------------
 if st.session_state.market is None:
-    st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Select Investment Market</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
     m1, m2 = st.columns(2)
     with m1:
-        st.info("### 🇵🇰 Pakistani Stocks\nTrack PSX shares, domestic cash flows, and FBR capital gain taxes.")
+        st.info("### 🇵🇰 Pakistani Stocks\nDedicated ledger for PSX shares, domestic cash balances, and local taxes.")
         if st.button("Open Pakistani Portfolio", use_container_width=True):
-            st.session_state.market = "PK"
-            st.session_state.current_page = "MAIN_MENU"
-            st.rerun()
+            navigate_to("MAIN_MENU", market="PK")
     with m2:
-        st.success("### 🌐 International Stocks\nTrack global equities with foreign country tags, multi-currency flows, and tax rates.")
+        st.success("### 🌐 International Stocks\nDedicated ledger for US & global equities with country tags and foreign CGT rates.")
         if st.button("Open International Portfolio", use_container_width=True):
-            st.session_state.market = "INTL"
-            st.session_state.current_page = "MAIN_MENU"
-            st.rerun()
+            navigate_to("MAIN_MENU", market="INTL")
     st.stop()
 
 MARKET = st.session_state.market
 CURRENCY = "PKR" if MARKET == "PK" else "USD"
 
-# Safe Data Fetchers
+# Safe Data Query Functions
 def load_buys():
     try:
         res = supabase.table("buy_orders").select("*").eq("market", MARKET).execute()
@@ -229,62 +335,49 @@ def load_cash():
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# LEVEL 2: ACTION MENU HUB (Displayed When a Market is Selected)
+# 9. DEDICATED ACTION MENU HUB (Displayed When a Market is Picked)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MAIN_MENU":
-    st.markdown("<h2 style='text-align:center;'>Management Actions</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center;'>Management Options</h2>", unsafe_allow_html=True)
     
-    # 4 Primary Mobile & Desktop Buttons
+    # Primary actions (Visible across both Mobile and PC)
     c1, c2 = st.columns(2)
     with c1:
         if st.button("➕ Purchase Record", use_container_width=True):
-            st.session_state.current_page = "PURCHASE"
-            st.rerun()
+            navigate_to("PURCHASE")
         if st.button("📥 Deposit", use_container_width=True):
-            st.session_state.current_page = "DEPOSIT"
-            st.rerun()
+            navigate_to("DEPOSIT")
     with c2:
         if st.button("➖ Sell Record", use_container_width=True):
-            st.session_state.current_page = "SELL"
-            st.rerun()
+            navigate_to("SELL")
         if st.button("📤 Withdrawal", use_container_width=True):
-            st.session_state.current_page = "WITHDRAWAL"
-            st.rerun()
+            navigate_to("WITHDRAWAL")
 
-    # Reporting & PC Options
+    # Extended Analytics and Edit (Hidden on narrow mobile screens via CSS)
     st.markdown('<div class="pc-only-module">', unsafe_allow_html=True)
     r1, r2, r3 = st.columns(3)
     with r1:
         if st.button("📅 Weekly Summary", use_container_width=True):
-            st.session_state.current_page = "WEEKLY"
-            st.rerun()
+            navigate_to("WEEKLY")
     with r2:
         if st.button("🗓️ Monthly Summary", use_container_width=True):
-            st.session_state.current_page = "MONTHLY"
-            st.rerun()
+            navigate_to("MONTHLY")
     with r3:
         if st.button("🏆 Annual Performance", use_container_width=True):
-            st.session_state.current_page = "ANNUAL"
-            st.rerun()
+            navigate_to("ANNUAL")
 
-    p1, p2, p3 = st.columns(3)
+    p1, p2 = st.columns(2)
     with p1:
         if st.button("📊 Capital Gain Tax", use_container_width=True):
-            st.session_state.current_page = "CGT"
-            st.rerun()
+            navigate_to("CGT")
     with p2:
         if st.button("✏️ Edit", use_container_width=True):
-            st.session_state.current_page = "EDIT"
-            st.rerun()
-    with p3:
-        if st.button("🔑 Change Password", use_container_width=True):
-            st.session_state.current_page = "CHANGE_PW"
-            st.rerun()
+            navigate_to("EDIT")
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Active Holdings Search
     st.write("---")
-    st.subheader("🔍 Holdings Explorer")
+    st.subheader("🔍 Current Open Holdings Explorer")
     buys_df = load_buys()
     search_sym = st.text_input("Search Stock Symbol:", "").strip().upper()
     if not buys_df.empty:
@@ -299,23 +392,16 @@ if st.session_state.current_page == "MAIN_MENU":
                 cols.insert(2, "country")
             st.dataframe(open_lots[cols], use_container_width=True)
         else:
-            st.info("No active holdings found.")
+            st.info("No active open shares currently held.")
     else:
         st.info("No purchases recorded yet.")
     st.stop()
 
-# Back to menu action bar
-b_col, _ = st.columns([2, 8])
-with b_col:
-    if st.button("⬅️ Back to Menu", use_container_width=True):
-        st.session_state.current_page = "MAIN_MENU"
-        st.rerun()
-
 # ------------------------------------------------------------------------------
-# LEVEL 3: DEDICATED PAGE VIEWS
+# 10. SPECIFIC SUBPAGES (Each page opens dedicated input fields)
 # ------------------------------------------------------------------------------
 
-# PAGE 1: PURCHASE RECORD
+# PAGE: PURCHASE RECORD
 if st.session_state.current_page == "PURCHASE":
     st.header("➕ Purchase Record Entry")
     buys_df = load_buys()
@@ -364,7 +450,7 @@ if st.session_state.current_page == "PURCHASE":
                 supabase.table("buy_orders").insert(payload).execute()
                 st.success(f"✅ Purchase of {shares} shares of {sym} recorded!")
 
-# PAGE 2: SELL RECORD
+# PAGE: SELL RECORD
 elif st.session_state.current_page == "SELL":
     st.header("➖ Sell Record Entry")
     buys_df = load_buys()
@@ -430,7 +516,7 @@ elif st.session_state.current_page == "SELL":
         else:
             st.info("No available shares found for this symbol.")
 
-# PAGE 3 & 4: DEPOSIT & WITHDRAWAL
+# PAGE: DEPOSIT & WITHDRAWAL
 elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
     flow_kind = st.session_state.current_page
     st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
@@ -464,7 +550,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
     if not cf_df.empty:
         st.dataframe(cf_df[cf_df["flow_type"] == flow_kind][["entry_date", "entry_time", "amount", "notes"]], use_container_width=True)
 
-# PAGE 5: WEEKLY SUMMARY
+# PAGE: WEEKLY SUMMARY
 elif st.session_state.current_page == "WEEKLY":
     st.header("📅 Weekly Summary (Monday – Friday)")
     sells_df = load_sells()
@@ -491,7 +577,7 @@ elif st.session_state.current_page == "WEEKLY":
                 emoji = "🟢 Profit" if row["net_pnl"] >= 0 else "🔴 Loss"
                 st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {emoji} {CURRENCY} {row['net_pnl']:,.2f}")
 
-# PAGE 6: MONTHLY SUMMARY
+# PAGE: MONTHLY SUMMARY
 elif st.session_state.current_page == "MONTHLY":
     st.header("🗓️ Monthly Summary (1st to Last Day)")
     sells_df = load_sells()
@@ -515,7 +601,7 @@ elif st.session_state.current_page == "MONTHLY":
                 icon = "💰 Profit" if row["net_pnl"] >= 0 else "🔻 Loss"
                 st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {icon} {CURRENCY} {row['net_pnl']:,.2f}")
 
-# PAGE 7: ANNUAL PERFORMANCE
+# PAGE: ANNUAL PERFORMANCE
 elif st.session_state.current_page == "ANNUAL":
     st.header("🏆 Annual Performance (From Jan 1)")
     sells_df = load_sells()
@@ -544,7 +630,7 @@ elif st.session_state.current_page == "ANNUAL":
                 badge = "⭐ Profit" if row["net_pnl"] >= 0 else "❌ Loss"
                 st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {badge} {CURRENCY} {row['net_pnl']:,.2f}")
 
-# PAGE 8: CAPITAL GAIN TAX
+# PAGE: CAPITAL GAIN TAX
 elif st.session_state.current_page == "CGT":
     st.header("📊 Capital Gains Tax Ledger")
     sells_df = load_sells()
@@ -563,7 +649,7 @@ elif st.session_state.current_page == "CGT":
             cgt_df.columns = ["Stock Symbol", "Buy Price", "Sell Price", "Buy Date", "Sell Date", "% Tax Deduction", "Capital Gain Tax", "Net P&L"]
             st.dataframe(cgt_df, use_container_width=True)
 
-# PAGE 9: EDIT RECORDS
+# PAGE: EDIT RECORDS
 elif st.session_state.current_page == "EDIT":
     st.header("✏️ Edit Ledger Records")
     sub_edit = st.radio("Choose Record Category:", ["Edit Purchases", "Edit Sells", "Edit Cash Flows"], horizontal=True)
@@ -686,24 +772,3 @@ elif st.session_state.current_page == "EDIT":
                     st.success("✅ Cash flow record updated successfully!")
         else:
             st.info("No cash flow entries found.")
-
-# PAGE 10: CHANGE PASSWORD
-elif st.session_state.current_page == "CHANGE_PW":
-    st.header("🔑 Change Password")
-    with st.form("change_password_form"):
-        st.write(f"Logged in as: **{st.session_state.user_email}**")
-        new_pw = st.text_input("New Password", type="password")
-        confirm_pw = st.text_input("Confirm New Password", type="password")
-        update_btn = st.form_submit_button("Update Password")
-
-        if update_btn:
-            if not new_pw or len(new_pw) < 6:
-                st.error("Password must be at least 6 characters.")
-            elif new_pw != confirm_pw:
-                st.error("Passwords do not match.")
-            else:
-                try:
-                    supabase.auth.update_user({"password": new_pw})
-                    st.success("✅ Password successfully changed!")
-                except Exception as e:
-                    st.error(f"Failed to update password: {str(e)}")
