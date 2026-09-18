@@ -7,7 +7,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
-# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
+# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED DIALOG
 # ------------------------------------------------------------------------------
 components.html("""
 <script>
@@ -32,11 +32,11 @@ components.html("""
 """, height=0)
 
 # ------------------------------------------------------------------------------
-# 2. UNIFORM CENTERED BUTTONS & STYLING
+# 2. BUTTONS STYLED TO EXACTLY HALF THE SCREEN WIDTH (50vw) & CENTERED
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Centered menu wrapper */
+    /* Center wrapper for menu layouts */
     .button-center-col {
         display: flex;
         flex-direction: column;
@@ -46,21 +46,23 @@ st.markdown("""
         margin-top: 15px;
     }
 
-    /* Fixed equal dimensions for all options buttons */
-    .button-center-col div[data-testid="stButton"] {
-        width: 100%;
-        display: flex;
-        justify-content: center;
+    /* Force all primary/action buttons to half of viewport screen width (50vw) */
+    .button-center-col div[data-testid="stButton"],
+    div[data-testid="stFormSubmitButton"] {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
     }
 
-    .button-center-col div[data-testid="stButton"] button {
-        width: 320px !important;
-        min-width: 320px !important;
-        max-width: 320px !important;
+    .button-center-col div[data-testid="stButton"] button,
+    div[data-testid="stFormSubmitButton"] button {
+        width: 50vw !important;
+        min-width: 50vw !important;
+        max-width: 50vw !important;
         height: 52px !important;
         font-size: 16px !important;
         font-weight: 600 !important;
-        margin: 6px auto !important;
+        margin: 8px auto !important;
         border-radius: 8px !important;
         display: block !important;
     }
@@ -87,7 +89,9 @@ st.markdown("""
     div[data-testid="stButton"] button:has-text("📝 Edit Purchases"),
     div[data-testid="stButton"] button:has-text("📝 Edit Sells"),
     div[data-testid="stButton"] button:has-text("📝 Edit Deposits"),
-    div[data-testid="stButton"] button:has-text("📝 Edit Withdrawals") {
+    div[data-testid="stButton"] button:has-text("📝 Edit Withdrawals"),
+    div[data-testid="stButton"] button:has-text("Open Pakistani Portfolio"),
+    div[data-testid="stButton"] button:has-text("Open International Portfolio") {
         background-color: #2563eb !important;
         color: white !important;
         border: none !important;
@@ -192,9 +196,11 @@ if not st.session_state.authenticated:
                 except Exception as e:
                     st.error(f"Sign in failed: {str(e)}")
 
+        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
         if st.button("Forgot Password?"):
             st.session_state.auth_view = "FORGOT"
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.auth_view == "FORGOT":
         st.write("Enter your email to receive recovery instructions.")
@@ -208,9 +214,11 @@ if not st.session_state.authenticated:
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
+        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
         if st.button("Back to Login"):
             st.session_state.auth_view = "LOGIN"
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.stop()
 
@@ -292,31 +300,31 @@ if st.session_state.current_page == "CHANGE_PW":
                 except Exception as e:
                     st.error(f"Failed to update password: {str(e)}")
 
+    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
     if st.button("⬅️ Return to Home"):
         st.session_state.market = None
         st.session_state.current_page = "HOME"
         st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 8. HOME: MARKET SELECTION SCREEN
+# 8. HOME: MARKET SELECTION (Buttons at 50vw)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "HOME" or st.session_state.market is None:
     st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
 
-    _, center_box, _ = st.columns([1, 2.5, 1])
-    with center_box:
-        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
-        st.info("### 🇵🇰 Pakistani Stocks\nTrack domestic equities, local cash flows, and FBR capital gains taxes.")
-        if st.button("Open Pakistani Portfolio"):
-            navigate_to("MARKET_MENU", market="PK")
+    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
+    st.info("### 🇵🇰 Pakistani Stocks\nTrack domestic equities, local cash flows, and FBR capital gains taxes.")
+    if st.button("Open Pakistani Portfolio"):
+        navigate_to("MARKET_MENU", market="PK")
 
-        st.write("")
+    st.write("")
 
-        st.success("### 🌐 International Stocks\nTrack US & global equities with country tags, multi-currency flows, and tax deductions.")
-        if st.button("Open International Portfolio"):
-            navigate_to("MARKET_MENU", market="INTL")
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.success("### 🌐 International Stocks\nTrack US & global equities with country tags, multi-currency flows, and tax deductions.")
+    if st.button("Open International Portfolio"):
+        navigate_to("MARKET_MENU", market="INTL")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.stop()
 
@@ -345,45 +353,43 @@ def load_cash():
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 9. DEDICATED MARKET OPTIONS MENU PAGE
+# 9. DEDICATED MARKET OPTIONS MENU PAGE (Buttons at 50vw)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MARKET_MENU":
     st.markdown(f"<h2 style='text-align:center;'>{'Pakistani' if MARKET == 'PK' else 'International'} Management Options</h2>", unsafe_allow_html=True)
 
-    _, menu_col, _ = st.columns([1, 2.5, 1])
-    with menu_col:
-        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
+    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
 
-        if st.button("➕ Purchase Record"):
-            navigate_to("PURCHASE")
+    if st.button("➕ Purchase Record"):
+        navigate_to("PURCHASE")
 
-        if st.button("➖ Sell Record"):
-            navigate_to("SELL")
+    if st.button("➖ Sell Record"):
+        navigate_to("SELL")
 
-        if st.button("📥 Deposit"):
-            navigate_to("DEPOSIT")
+    if st.button("📥 Deposit"):
+        navigate_to("DEPOSIT")
 
-        if st.button("📤 Withdrawal"):
-            navigate_to("WITHDRAWAL")
+    if st.button("📤 Withdrawal"):
+        navigate_to("WITHDRAWAL")
 
-        st.markdown('<div class="pc-only-module" style="width: 100%;">', unsafe_allow_html=True)
+    st.markdown('<div class="pc-only-module button-center-col" style="margin-top:0;">', unsafe_allow_html=True)
 
-        if st.button("📅 Weekly Summary"):
-            navigate_to("WEEKLY")
+    if st.button("📅 Weekly Summary"):
+        navigate_to("WEEKLY")
 
-        if st.button("🗓️ Monthly Summary"):
-            navigate_to("MONTHLY")
+    if st.button("🗓️ Monthly Summary"):
+        navigate_to("MONTHLY")
 
-        if st.button("🏆 Annual Performance"):
-            navigate_to("ANNUAL")
+    if st.button("🏆 Annual Performance"):
+        navigate_to("ANNUAL")
 
-        if st.button("📊 Capital Gain Tax"):
-            navigate_to("CGT")
+    if st.button("📊 Capital Gain Tax"):
+        navigate_to("CGT")
 
-        if st.button("✏️ Edit"):
-            navigate_to("EDIT_MENU")
+    if st.button("✏️ Edit"):
+        navigate_to("EDIT_MENU")
 
-        st.markdown('</div></div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
     st.write("---")
     st.subheader("🔍 Current Open Holdings")
@@ -407,28 +413,26 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. DEDICATED EDIT OPTIONS MENU PAGE (Same UI style as Market Menu)
+# 10. DEDICATED EDIT OPTIONS MENU PAGE (Buttons at 50vw)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "EDIT_MENU":
     st.markdown("<h2 style='text-align:center;'>✏️ Choose Record Type to Edit</h2>", unsafe_allow_html=True)
 
-    _, edit_col, _ = st.columns([1, 2.5, 1])
-    with edit_col:
-        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
+    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
 
-        if st.button("📝 Edit Purchases"):
-            navigate_to("EDIT_PURCHASES")
+    if st.button("📝 Edit Purchases"):
+        navigate_to("EDIT_PURCHASES")
 
-        if st.button("📝 Edit Sells"):
-            navigate_to("EDIT_SELLS")
+    if st.button("📝 Edit Sells"):
+        navigate_to("EDIT_SELLS")
 
-        if st.button("📝 Edit Deposits"):
-            navigate_to("EDIT_DEPOSITS")
+    if st.button("📝 Edit Deposits"):
+        navigate_to("EDIT_DEPOSITS")
 
-        if st.button("📝 Edit Withdrawals"):
-            navigate_to("EDIT_WITHDRAWALS")
+    if st.button("📝 Edit Withdrawals"):
+        navigate_to("EDIT_WITHDRAWALS")
 
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # ------------------------------------------------------------------------------
