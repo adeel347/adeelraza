@@ -7,7 +7,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
-# 1. MOBILE BROWSER POPSTATE INTERCEPTOR & UNSAVED DIALOG
+# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
 # ------------------------------------------------------------------------------
 components.html("""
 <script>
@@ -32,20 +32,21 @@ components.html("""
 """, height=0)
 
 # ------------------------------------------------------------------------------
-# 2. IDENTICAL BUTTON SIZES & CENTER ALIGNMENT CSS
+# 2. UNIFORM CENTERED BUTTONS & STYLING
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Center container wrapper */
+    /* Centered menu wrapper */
     .button-center-col {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         width: 100%;
+        margin-top: 15px;
     }
 
-    /* Fixed equal dimensions for all action buttons */
+    /* Fixed equal dimensions for all options buttons */
     .button-center-col div[data-testid="stButton"] {
         width: 100%;
         display: flex;
@@ -82,7 +83,11 @@ st.markdown("""
     div[data-testid="stButton"] button:has-text("🏆 Annual Performance"),
     div[data-testid="stButton"] button:has-text("📊 Capital Gain Tax"),
     div[data-testid="stButton"] button:has-text("📥 Deposit"),
-    div[data-testid="stButton"] button:has-text("📤 Withdrawal") {
+    div[data-testid="stButton"] button:has-text("📤 Withdrawal"),
+    div[data-testid="stButton"] button:has-text("📝 Edit Purchases"),
+    div[data-testid="stButton"] button:has-text("📝 Edit Sells"),
+    div[data-testid="stButton"] button:has-text("📝 Edit Deposits"),
+    div[data-testid="stButton"] button:has-text("📝 Edit Withdrawals") {
         background-color: #2563eb !important;
         color: white !important;
         border: none !important;
@@ -94,7 +99,16 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Responsive filter for mobile view */
+    /* Entry card container */
+    .entry-card {
+        background-color: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
+    }
+
+    /* Mobile query to restrict desktop extras */
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -104,7 +118,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
-# 3. SUPABASE CLIENT
+# 3. SUPABASE CLIENT INITIALIZATION
 # ------------------------------------------------------------------------------
 @st.cache_resource
 def get_supabase() -> Client:
@@ -119,7 +133,7 @@ except Exception as e:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 4. NAVIGATION STATE
+# 4. NAVIGATION STATE MANAGEMENT
 # ------------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -128,17 +142,20 @@ if "user_email" not in st.session_state:
 if "market" not in st.session_state:
     st.session_state.market = None
 if "current_page" not in st.session_state:
-    st.session_state.current_page = "MAIN_MENU"
+    st.session_state.current_page = "HOME"
 if "nav_stack" not in st.session_state:
     st.session_state.nav_stack = []
 if "auth_view" not in st.session_state:
     st.session_state.auth_view = "LOGIN"
+if "active_editing_id" not in st.session_state:
+    st.session_state.active_editing_id = None
 
 def navigate_to(page, market=None):
     st.session_state.nav_stack.append((st.session_state.market, st.session_state.current_page))
     if market is not None:
         st.session_state.market = market
     st.session_state.current_page = page
+    st.session_state.active_editing_id = None
     st.rerun()
 
 def go_back():
@@ -148,11 +165,12 @@ def go_back():
         st.session_state.current_page = prev_page
     else:
         st.session_state.market = None
-        st.session_state.current_page = "MAIN_MENU"
+        st.session_state.current_page = "HOME"
+    st.session_state.active_editing_id = None
     st.rerun()
 
 # ------------------------------------------------------------------------------
-# 5. AUTHENTICATION (Login & Reset)
+# 5. AUTHENTICATION (Login & Forgot Password)
 # ------------------------------------------------------------------------------
 if not st.session_state.authenticated:
     st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal Login</h2>", unsafe_allow_html=True)
@@ -168,7 +186,7 @@ if not st.session_state.authenticated:
                         st.session_state.authenticated = True
                         st.session_state.user_email = res.user.email
                         st.session_state.market = None
-                        st.session_state.current_page = "MAIN_MENU"
+                        st.session_state.current_page = "HOME"
                         st.session_state.nav_stack = []
                         st.rerun()
                 except Exception as e:
@@ -199,14 +217,14 @@ if not st.session_state.authenticated:
 # ------------------------------------------------------------------------------
 # 6. PERSISTENT GLOBAL TOP BAR
 # ------------------------------------------------------------------------------
-is_home_page = (st.session_state.market is None)
+is_home_page = (st.session_state.current_page == "HOME" or st.session_state.market is None)
 
 if is_home_page:
     col_home, col_title, col_pw, col_out = st.columns([1.5, 3.5, 2.5, 1.5])
     with col_home:
         if st.button("🏠 Home"):
             st.session_state.market = None
-            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.current_page = "HOME"
             st.session_state.nav_stack = []
             st.rerun()
     with col_title:
@@ -220,7 +238,7 @@ if is_home_page:
             st.session_state.authenticated = False
             st.session_state.user_email = ""
             st.session_state.market = None
-            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.current_page = "HOME"
             st.session_state.nav_stack = []
             st.rerun()
 else:
@@ -228,7 +246,7 @@ else:
     with col_home:
         if st.button("🏠 Home"):
             st.session_state.market = None
-            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.current_page = "HOME"
             st.session_state.nav_stack = []
             st.rerun()
     with col_back:
@@ -245,7 +263,7 @@ else:
             st.session_state.authenticated = False
             st.session_state.user_email = ""
             st.session_state.market = None
-            st.session_state.current_page = "MAIN_MENU"
+            st.session_state.current_page = "HOME"
             st.session_state.nav_stack = []
             st.rerun()
 
@@ -276,27 +294,29 @@ if st.session_state.current_page == "CHANGE_PW":
 
     if st.button("⬅️ Return to Home"):
         st.session_state.market = None
-        st.session_state.current_page = "MAIN_MENU"
+        st.session_state.current_page = "HOME"
         st.rerun()
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 8. HOME: MARKET SELECTION
+# 8. HOME: MARKET SELECTION SCREEN
 # ------------------------------------------------------------------------------
-if st.session_state.market is None:
+if st.session_state.current_page == "HOME" or st.session_state.market is None:
     st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
 
-    _, center_box, _ = st.columns([1, 2, 1])
+    _, center_box, _ = st.columns([1, 2.5, 1])
     with center_box:
+        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
         st.info("### 🇵🇰 Pakistani Stocks\nTrack domestic equities, local cash flows, and FBR capital gains taxes.")
-        if st.button("Open Pakistani Portfolio", use_container_width=True):
-            navigate_to("MAIN_MENU", market="PK")
+        if st.button("Open Pakistani Portfolio"):
+            navigate_to("MARKET_MENU", market="PK")
 
         st.write("")
 
         st.success("### 🌐 International Stocks\nTrack US & global equities with country tags, multi-currency flows, and tax deductions.")
-        if st.button("Open International Portfolio", use_container_width=True):
-            navigate_to("MAIN_MENU", market="INTL")
+        if st.button("Open International Portfolio"):
+            navigate_to("MARKET_MENU", market="INTL")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.stop()
 
@@ -325,12 +345,11 @@ def load_cash():
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 9. SINGLE COLUMN CENTERED OPTIONS MENU (Same Size, Centered, One per Row)
+# 9. DEDICATED MARKET OPTIONS MENU PAGE
 # ------------------------------------------------------------------------------
-if st.session_state.current_page == "MAIN_MENU":
-    st.markdown("<h2 style='text-align:center; margin-bottom: 20px;'>Management Options</h2>", unsafe_allow_html=True)
+if st.session_state.current_page == "MARKET_MENU":
+    st.markdown(f"<h2 style='text-align:center;'>{'Pakistani' if MARKET == 'PK' else 'International'} Management Options</h2>", unsafe_allow_html=True)
 
-    # Centered container for buttons
     _, menu_col, _ = st.columns([1, 2.5, 1])
     with menu_col:
         st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
@@ -362,12 +381,12 @@ if st.session_state.current_page == "MAIN_MENU":
             navigate_to("CGT")
 
         if st.button("✏️ Edit"):
-            navigate_to("EDIT")
+            navigate_to("EDIT_MENU")
 
         st.markdown('</div></div>', unsafe_allow_html=True)
 
     st.write("---")
-    st.subheader("🔍 Open Stock Holdings")
+    st.subheader("🔍 Current Open Holdings")
     buys_df = load_buys()
     search_sym = st.text_input("Search Stock Symbol:", "").strip().upper()
     if not buys_df.empty:
@@ -388,10 +407,35 @@ if st.session_state.current_page == "MAIN_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. SUBPAGES & ENTRY FORMS
+# 10. DEDICATED EDIT OPTIONS MENU PAGE (Same UI style as Market Menu)
+# ------------------------------------------------------------------------------
+if st.session_state.current_page == "EDIT_MENU":
+    st.markdown("<h2 style='text-align:center;'>✏️ Choose Record Type to Edit</h2>", unsafe_allow_html=True)
+
+    _, edit_col, _ = st.columns([1, 2.5, 1])
+    with edit_col:
+        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
+
+        if st.button("📝 Edit Purchases"):
+            navigate_to("EDIT_PURCHASES")
+
+        if st.button("📝 Edit Sells"):
+            navigate_to("EDIT_SELLS")
+
+        if st.button("📝 Edit Deposits"):
+            navigate_to("EDIT_DEPOSITS")
+
+        if st.button("📝 Edit Withdrawals"):
+            navigate_to("EDIT_WITHDRAWALS")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+# ------------------------------------------------------------------------------
+# 11. ENTRY SUBPAGES
 # ------------------------------------------------------------------------------
 
-# PAGE: PURCHASE RECORD
+# PURCHASE ENTRY
 if st.session_state.current_page == "PURCHASE":
     st.header("➕ Purchase Record Entry")
     buys_df = load_buys()
@@ -440,7 +484,7 @@ if st.session_state.current_page == "PURCHASE":
                 except Exception as err:
                     st.error(f"Error saving purchase: {err}")
 
-# PAGE: SELL RECORD
+# SELL ENTRY
 elif st.session_state.current_page == "SELL":
     st.header("➖ Sell Record Entry")
     buys_df = load_buys()
@@ -509,7 +553,7 @@ elif st.session_state.current_page == "SELL":
         else:
             st.info("No available shares found.")
 
-# PAGE: DEPOSIT & WITHDRAWAL
+# DEPOSIT & WITHDRAWAL ENTRY
 elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
     flow_kind = st.session_state.current_page
     st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
@@ -548,7 +592,11 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         if not filtered_cf.empty:
             st.dataframe(filtered_cf[["entry_date", "entry_time", "amount", "notes"]], use_container_width=True)
 
-# PAGE: WEEKLY SUMMARY
+# ------------------------------------------------------------------------------
+# 12. REPORTING PAGES
+# ------------------------------------------------------------------------------
+
+# WEEKLY SUMMARY
 elif st.session_state.current_page == "WEEKLY":
     st.header("📅 Weekly Summary (Monday – Friday)")
     sells_df = load_sells()
@@ -575,7 +623,7 @@ elif st.session_state.current_page == "WEEKLY":
                 emoji = "🟢 Profit" if row["net_pnl"] >= 0 else "🔴 Loss"
                 st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {emoji} {CURRENCY} {row['net_pnl']:,.2f}")
 
-# PAGE: MONTHLY SUMMARY
+# MONTHLY SUMMARY
 elif st.session_state.current_page == "MONTHLY":
     st.header("🗓️ Monthly Summary (1st to Last Day)")
     sells_df = load_sells()
@@ -599,7 +647,7 @@ elif st.session_state.current_page == "MONTHLY":
                 icon = "💰 Profit" if row["net_pnl"] >= 0 else "🔻 Loss"
                 st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {icon} {CURRENCY} {row['net_pnl']:,.2f}")
 
-# PAGE: ANNUAL PERFORMANCE
+# ANNUAL PERFORMANCE
 elif st.session_state.current_page == "ANNUAL":
     st.header("🏆 Annual Performance (From Jan 1)")
     sells_df = load_sells()
@@ -628,7 +676,7 @@ elif st.session_state.current_page == "ANNUAL":
                 badge = "⭐ Profit" if row["net_pnl"] >= 0 else "❌ Loss"
                 st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {badge} {CURRENCY} {row['net_pnl']:,.2f}")
 
-# PAGE: CAPITAL GAIN TAX
+# CAPITAL GAIN TAX
 elif st.session_state.current_page == "CGT":
     st.header("📊 Capital Gains Tax Ledger")
     sells_df = load_sells()
@@ -647,27 +695,46 @@ elif st.session_state.current_page == "CGT":
             cgt_df.columns = ["Stock Symbol", "Buy Price", "Sell Price", "Buy Date", "Sell Date", "% Tax Deduction", "Capital Gain Tax", "Net P&L"]
             st.dataframe(cgt_df, use_container_width=True)
 
-# PAGE: EDIT RECORDS
-elif st.session_state.current_page == "EDIT":
-    st.header("✏️ Edit Ledger Records")
-    sub_edit = st.radio("Choose Record Category:", ["Edit Purchases", "Edit Sells", "Edit Cash Flows"], horizontal=True)
+# ------------------------------------------------------------------------------
+# 13. EDIT & DELETE MANAGEMENT PAGES (With "⋮ Actions" Button)
+# ------------------------------------------------------------------------------
 
-    if sub_edit == "Edit Purchases":
-        buys = load_buys()
-        if not buys.empty:
-            e_sym = st.text_input("🔍 Search Symbol", "").strip().upper()
-            if e_sym:
-                buys = buys[buys["symbol"].str.contains(e_sym, na=False)]
-                if buys.empty:
-                    st.warning("⚠️ Ticker not available")
+# EDIT PURCHASES
+elif st.session_state.current_page == "EDIT_PURCHASES":
+    st.header("✏️ Edit Purchase Records")
+    buys = load_buys()
+    if buys.empty:
+        st.info("No purchase records found.")
+    else:
+        e_sym = st.text_input("🔍 Filter by Symbol:", "").strip().upper()
+        if e_sym:
+            buys = buys[buys["symbol"].str.contains(e_sym, na=False)]
+            if buys.empty:
+                st.warning("⚠️ Ticker not available")
 
-            if not buys.empty:
-                opts = {f"ID #{r['id']} | {r['symbol']} | Bought on {r['purchase_date']}": r for _, r in buys.iterrows()}
-                chosen_b = st.selectbox("Select Record to Edit:", list(opts.keys()))
-                item = opts[chosen_b]
+        for _, item in buys.iterrows():
+            item_id = item["id"]
+            c_info, c_action = st.columns([4, 1.2])
+            with c_info:
+                st.markdown(f"""
+                <div class="entry-card">
+                    <b>ID #{item_id} | {item['symbol']} ({item['stock_name']})</b><br>
+                    Bought: {item['shares_bought']} sh @ {item['price_per_share']} {CURRENCY} on {item['purchase_date']} | Rem: {item['shares_remaining']} sh
+                </div>
+                """, unsafe_allow_html=True)
+            with c_action:
+                with st.popover("⋮ Actions"):
+                    if st.button("✏️ Edit", key=f"btn_edit_buy_{item_id}", use_container_width=True):
+                        st.session_state.active_editing_id = item_id
+                    if st.button("🗑️ Delete", key=f"btn_del_buy_{item_id}", use_container_width=True):
+                        supabase.table("buy_orders").delete().eq("id", item_id).execute()
+                        st.success(f"Deleted Lot #{item_id}")
+                        st.rerun()
 
-                with st.form("edit_buy_form"):
-                    st.warning("⚠️ Changes are NOT saved until you click 'Save Changes' below.")
+            # Inline Edit Form
+            if st.session_state.active_editing_id == item_id:
+                with st.form(f"edit_form_buy_{item_id}"):
+                    st.write(f"Editing Purchase ID #{item_id}")
                     sym_val = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
                     name_val = st.text_input("Stock Name", value=item["stock_name"]).strip()
                     date_val = st.date_input("Purchase Date", value=pd.to_datetime(item["purchase_date"]).date())
@@ -677,8 +744,7 @@ elif st.session_state.current_page == "EDIT":
                     tx_val = st.number_input("Taxes", value=float(item["taxes"]))
                     rem_val = st.number_input("Shares Remaining", value=float(item["shares_remaining"]))
 
-                    up_b = st.form_submit_button("Save Changes")
-                    if up_b:
+                    if st.form_submit_button("Save Changes"):
                         new_tot = (sh_val * pr_val) + fe_val + tx_val
                         payload = {
                             "symbol": sym_val,
@@ -691,38 +757,56 @@ elif st.session_state.current_page == "EDIT":
                             "total_cost": round(float(new_tot), 2),
                             "shares_remaining": float(rem_val)
                         }
-                        supabase.table("buy_orders").update(payload).eq("id", item["id"]).execute()
+                        supabase.table("buy_orders").update(payload).eq("id", item_id).execute()
+                        st.session_state.active_editing_id = None
                         st.success("✅ Purchase updated successfully!")
-        else:
-            st.info("No purchase records found.")
+                        st.rerun()
 
-    elif sub_edit == "Edit Sells":
-        sells = load_sells()
-        if not sells.empty:
-            s_filter = st.text_input("🔍 Search Symbol", "").strip().upper()
-            if s_filter:
-                sells = sells[sells["symbol"].str.contains(s_filter, na=False)]
-                if sells.empty:
-                    st.warning("⚠️ Ticker not available")
+# EDIT SELLS
+elif st.session_state.current_page == "EDIT_SELLS":
+    st.header("✏️ Edit Sell Records")
+    sells = load_sells()
+    if sells.empty:
+        st.info("No sell records found.")
+    else:
+        s_filter = st.text_input("🔍 Filter by Symbol:", "").strip().upper()
+        if s_filter:
+            sells = sells[sells["symbol"].str.contains(s_filter, na=False)]
+            if sells.empty:
+                st.warning("⚠️ Ticker not available")
 
-            if not sells.empty:
-                opts_s = {f"ID #{r['id']} | {r['symbol']} | Sold on {r['sale_date']}": r for _, r in sells.iterrows()}
-                chosen_s = st.selectbox("Select Sale to Edit:", list(opts_s.keys()))
-                s_item = opts_s[chosen_s]
+        for _, item in sells.iterrows():
+            item_id = item["id"]
+            c_info, c_action = st.columns([4, 1.2])
+            with c_info:
+                st.markdown(f"""
+                <div class="entry-card">
+                    <b>ID #{item_id} | {item['symbol']} ({item['stock_name']})</b><br>
+                    Sold: {item['shares_sold']} sh @ {item['sale_price']} {CURRENCY} on {item['sale_date']} | Net P&L: {item['net_pnl']} {CURRENCY}
+                </div>
+                """, unsafe_allow_html=True)
+            with c_action:
+                with st.popover("⋮ Actions"):
+                    if st.button("✏️ Edit", key=f"btn_edit_sell_{item_id}", use_container_width=True):
+                        st.session_state.active_editing_id = item_id
+                    if st.button("🗑️ Delete", key=f"btn_del_sell_{item_id}", use_container_width=True):
+                        supabase.table("sell_orders").delete().eq("id", item_id).execute()
+                        st.success(f"Deleted Sell #{item_id}")
+                        st.rerun()
 
-                with st.form("edit_sell_form"):
-                    st.warning("⚠️ Changes are NOT saved until you click 'Save Changes' below.")
-                    ss_sym = st.text_input("Stock Symbol", value=s_item["symbol"]).strip().upper()
-                    ss_name = st.text_input("Stock Name", value=s_item["stock_name"]).strip()
-                    ss_date = st.date_input("Sale Date", value=pd.to_datetime(s_item["sale_date"]).date())
-                    ss_sh = st.number_input("Shares Sold", value=float(s_item["shares_sold"]))
-                    ss_sp = st.number_input("Sale Price", value=float(s_item["sale_price"]))
-                    ss_bp = st.number_input("Buy Price Basis", value=float(s_item["buy_price"]))
-                    ss_fe = st.number_input("Selling Fees", value=float(s_item["selling_fees"]))
-                    ss_rt = st.number_input("CGT Rate %", value=float(s_item["cgt_rate"]))
+            if st.session_state.active_editing_id == item_id:
+                with st.form(f"edit_form_sell_{item_id}"):
+                    st.write(f"Editing Sell ID #{item_id}")
+                    ss_sym = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
+                    ss_name = st.text_input("Stock Name", value=item["stock_name"]).strip()
+                    ss_date = st.date_input("Sale Date", value=pd.to_datetime(item["sale_date"]).date())
+                    ss_sh = st.number_input("Shares Sold", value=float(item["shares_sold"]))
+                    ss_sp = st.number_input("Sale Price", value=float(item["sale_price"]))
+                    ss_bp = st.number_input("Buy Price Basis", value=float(item["buy_price"]))
+                    ss_fe = st.number_input("Selling Fees", value=float(item["selling_fees"]))
+                    ss_rt = st.number_input("CGT Rate %", value=float(item["cgt_rate"]))
 
-                    up_s = st.form_submit_button("Save Changes")
-                    if up_s:
+                    if st.form_submit_button("Save Changes"):
                         gross = (ss_sh * ss_sp) - (ss_sh * ss_bp) - ss_fe
                         cgt = (gross * (ss_rt / 100.0)) if gross > 0 else 0.0
                         net = gross - cgt
@@ -739,34 +823,97 @@ elif st.session_state.current_page == "EDIT":
                             "cgt_tax": round(float(cgt), 2),
                             "net_pnl": round(float(net), 2)
                         }
-                        supabase.table("sell_orders").update(payload).eq("id", s_item["id"]).execute()
-                        st.success("✅ Sell record updated successfully!")
-        else:
-            st.info("No sell records found.")
+                        supabase.table("sell_orders").update(payload).eq("id", item_id).execute()
+                        st.session_state.active_editing_id = None
+                        st.success("✅ Sell record updated!")
+                        st.rerun()
 
-    elif sub_edit == "Edit Cash Flows":
-        cfs = load_cash()
-        if not cfs.empty:
-            opts_c = {f"ID #{r['id']} | {r['flow_type']} {r['amount']} on {r['entry_date']}": r for _, r in cfs.iterrows()}
-            chosen_c = st.selectbox("Select Cash Flow:", list(opts_c.keys()))
-            c_item = opts_c[chosen_c]
+# EDIT DEPOSITS
+elif st.session_state.current_page == "EDIT_DEPOSITS":
+    st.header("✏️ Edit Deposits")
+    cfs = load_cash()
+    deposits = cfs[cfs["flow_type"] == "DEPOSIT"] if not cfs.empty else pd.DataFrame()
 
-            with st.form("edit_cash_form"):
-                st.warning("⚠️ Changes are NOT saved until you click 'Save Changes' below.")
-                t_kind = st.selectbox("Type", ["DEPOSIT", "WITHDRAWAL"], index=0 if c_item["flow_type"] == "DEPOSIT" else 1)
-                t_date = st.date_input("Date", value=pd.to_datetime(c_item["entry_date"]).date())
-                t_amt = st.number_input("Amount", value=float(c_item["amount"]))
-                t_memo = st.text_input("Notes", value=c_item["notes"] or "")
+    if deposits.empty:
+        st.info("No deposit records found.")
+    else:
+        for _, item in deposits.iterrows():
+            item_id = item["id"]
+            c_info, c_action = st.columns([4, 1.2])
+            with c_info:
+                st.markdown(f"""
+                <div class="entry-card">
+                    <b>Deposit #{item_id} | {item['amount']} {CURRENCY}</b> on {item['entry_date']} ({item['entry_time']})<br>
+                    Note: {item['notes'] or 'None'}
+                </div>
+                """, unsafe_allow_html=True)
+            with c_action:
+                with st.popover("⋮ Actions"):
+                    if st.button("✏️ Edit", key=f"btn_edit_dep_{item_id}", use_container_width=True):
+                        st.session_state.active_editing_id = item_id
+                    if st.button("🗑️ Delete", key=f"btn_del_dep_{item_id}", use_container_width=True):
+                        supabase.table("cash_flows").delete().eq("id", item_id).execute()
+                        st.success(f"Deleted Deposit #{item_id}")
+                        st.rerun()
 
-                up_c = st.form_submit_button("Save Changes")
-                if up_c:
-                    payload = {
-                        "flow_type": t_kind,
-                        "entry_date": t_date.strftime("%Y-%m-%d"),
-                        "amount": float(t_amt),
-                        "notes": t_memo
-                    }
-                    supabase.table("cash_flows").update(payload).eq("id", c_item["id"]).execute()
-                    st.success("✅ Cash flow record updated successfully!")
-        else:
-            st.info("No cash flow entries found.")
+            if st.session_state.active_editing_id == item_id:
+                with st.form(f"edit_form_dep_{item_id}"):
+                    t_date = st.date_input("Date", value=pd.to_datetime(item["entry_date"]).date())
+                    t_amt = st.number_input("Amount", value=float(item["amount"]))
+                    t_memo = st.text_input("Notes", value=item["notes"] or "")
+
+                    if st.form_submit_button("Save Changes"):
+                        payload = {
+                            "entry_date": t_date.strftime("%Y-%m-%d"),
+                            "amount": float(t_amt),
+                            "notes": t_memo
+                        }
+                        supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
+                        st.session_state.active_editing_id = None
+                        st.success("✅ Deposit updated!")
+                        st.rerun()
+
+# EDIT WITHDRAWALS
+elif st.session_state.current_page == "EDIT_WITHDRAWALS":
+    st.header("✏️ Edit Withdrawals")
+    cfs = load_cash()
+    withdraws = cfs[cfs["flow_type"] == "WITHDRAWAL"] if not cfs.empty else pd.DataFrame()
+
+    if withdraws.empty:
+        st.info("No withdrawal records found.")
+    else:
+        for _, item in withdraws.iterrows():
+            item_id = item["id"]
+            c_info, c_action = st.columns([4, 1.2])
+            with c_info:
+                st.markdown(f"""
+                <div class="entry-card">
+                    <b>Withdrawal #{item_id} | {item['amount']} {CURRENCY}</b> on {item['entry_date']} ({item['entry_time']})<br>
+                    Note: {item['notes'] or 'None'}
+                </div>
+                """, unsafe_allow_html=True)
+            with c_action:
+                with st.popover("⋮ Actions"):
+                    if st.button("✏️ Edit", key=f"btn_edit_wd_{item_id}", use_container_width=True):
+                        st.session_state.active_editing_id = item_id
+                    if st.button("🗑️ Delete", key=f"btn_del_wd_{item_id}", use_container_width=True):
+                        supabase.table("cash_flows").delete().eq("id", item_id).execute()
+                        st.success(f"Deleted Withdrawal #{item_id}")
+                        st.rerun()
+
+            if st.session_state.active_editing_id == item_id:
+                with st.form(f"edit_form_wd_{item_id}"):
+                    t_date = st.date_input("Date", value=pd.to_datetime(item["entry_date"]).date())
+                    t_amt = st.number_input("Amount", value=float(item["amount"]))
+                    t_memo = st.text_input("Notes", value=item["notes"] or "")
+
+                    if st.form_submit_button("Save Changes"):
+                        payload = {
+                            "entry_date": t_date.strftime("%Y-%m-%d"),
+                            "amount": float(t_amt),
+                            "notes": t_memo
+                        }
+                        supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
+                        st.session_state.active_editing_id = None
+                        st.success("✅ Withdrawal updated!")
+                        st.rerun()
