@@ -32,29 +32,36 @@ components.html("""
 """, height=0)
 
 # ------------------------------------------------------------------------------
-# 2. SINGLE-COLUMN SEQUENTIAL BUTTONS & COLOR STYLING
+# 2. IDENTICAL BUTTON SIZES & CENTER ALIGNMENT CSS
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Card headers */
-    .metric-card {
-        background: #1e293b;
-        border-radius: 10px;
-        padding: 15px;
-        border: 1px solid #334155;
-        text-align: center;
-        margin-bottom: 12px;
+    /* Center container wrapper */
+    .button-center-col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
     }
-    .metric-title { color: #94a3b8; font-size: 13px; text-transform: uppercase; }
-    .metric-val { color: #f8fafc; font-size: 22px; font-weight: bold; }
 
-    /* Single column full-width vertical buttons */
-    .stButton button {
-        width: 100% !important;
-        height: 3.6rem !important;
-        font-size: 17px !important;
-        margin-bottom: 10px !important;
+    /* Fixed equal dimensions for all action buttons */
+    .button-center-col div[data-testid="stButton"] {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    .button-center-col div[data-testid="stButton"] button {
+        width: 320px !important;
+        min-width: 320px !important;
+        max-width: 320px !important;
+        height: 52px !important;
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        margin: 6px auto !important;
         border-radius: 8px !important;
+        display: block !important;
     }
 
     /* Green Purchase Button */
@@ -62,14 +69,12 @@ st.markdown("""
         background-color: #10b981 !important;
         color: white !important;
         border: none !important;
-        font-weight: bold !important;
     }
     /* Red Sell Button */
     div[data-testid="stButton"] button:has-text("➖ Sell Record") {
         background-color: #ef4444 !important;
         color: white !important;
         border: none !important;
-        font-weight: bold !important;
     }
     /* Blue Analytics and Cash Buttons */
     div[data-testid="stButton"] button:has-text("📅 Weekly Summary"),
@@ -81,17 +86,15 @@ st.markdown("""
         background-color: #2563eb !important;
         color: white !important;
         border: none !important;
-        font-weight: bold !important;
     }
     /* Grey Edit Button */
     div[data-testid="stButton"] button:has-text("✏️ Edit") {
         background-color: #64748b !important;
         color: white !important;
         border: none !important;
-        font-weight: bold !important;
     }
 
-    /* Auto Responsive: Hides desktop-only reports on mobile (<768px) */
+    /* Responsive filter for mobile view */
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -101,7 +104,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
-# 3. DATABASE CLIENT
+# 3. SUPABASE CLIENT
 # ------------------------------------------------------------------------------
 @st.cache_resource
 def get_supabase() -> Client:
@@ -112,7 +115,7 @@ def get_supabase() -> Client:
 try:
     supabase = get_supabase()
 except Exception as e:
-    st.error(f"Failed to initialize Supabase: {e}")
+    st.error(f"Database error: {e}")
     st.stop()
 
 # ------------------------------------------------------------------------------
@@ -149,7 +152,7 @@ def go_back():
     st.rerun()
 
 # ------------------------------------------------------------------------------
-# 5. AUTHENTICATION (Login / Reset)
+# 5. AUTHENTICATION (Login & Reset)
 # ------------------------------------------------------------------------------
 if not st.session_state.authenticated:
     st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal Login</h2>", unsafe_allow_html=True)
@@ -199,7 +202,7 @@ if not st.session_state.authenticated:
 is_home_page = (st.session_state.market is None)
 
 if is_home_page:
-    col_home, col_title, col_pw, col_out = st.columns([1.5, 4, 2.5, 1.5])
+    col_home, col_title, col_pw, col_out = st.columns([1.5, 3.5, 2.5, 1.5])
     with col_home:
         if st.button("🏠 Home"):
             st.session_state.market = None
@@ -207,7 +210,7 @@ if is_home_page:
             st.session_state.nav_stack = []
             st.rerun()
     with col_title:
-        st.markdown("<div style='text-align:center; font-weight:bold; font-size:18px; margin-top:8px;'>Portfolio Mode</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center; font-weight:bold; font-size:17px; margin-top:8px;'>Portfolio Selection</div>", unsafe_allow_html=True)
     with col_pw:
         if st.button("🔑 Change Password"):
             navigate_to("CHANGE_PW")
@@ -221,7 +224,7 @@ if is_home_page:
             st.session_state.nav_stack = []
             st.rerun()
 else:
-    col_home, col_back, col_title, col_stat, col_out = st.columns([1.2, 1.2, 4, 1.6, 1.4])
+    col_home, col_back, col_title, col_stat, col_out = st.columns([1.2, 1.2, 3.8, 1.8, 1.4])
     with col_home:
         if st.button("🏠 Home"):
             st.session_state.market = None
@@ -233,7 +236,7 @@ else:
             go_back()
     with col_title:
         badge = "Pakistani Stocks" if st.session_state.market == "PK" else "International Stocks"
-        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:18px; margin-top:8px;'>{badge}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:17px; margin-top:8px;'>{badge}</div>", unsafe_allow_html=True)
     with col_stat:
         st.button("🔐 Logged In", disabled=True)
     with col_out:
@@ -283,17 +286,17 @@ if st.session_state.current_page == "CHANGE_PW":
 if st.session_state.market is None:
     st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
 
-    # Pakistani Stocks (Removed "PK" prefix)
-    st.info("### 🇵🇰 Pakistani Stocks\nDedicated ledger for domestic shares, cash balances, and local taxes.")
-    if st.button("Open Pakistani Portfolio"):
-        navigate_to("MAIN_MENU", market="PK")
+    _, center_box, _ = st.columns([1, 2, 1])
+    with center_box:
+        st.info("### 🇵🇰 Pakistani Stocks\nTrack domestic equities, local cash flows, and FBR capital gains taxes.")
+        if st.button("Open Pakistani Portfolio", use_container_width=True):
+            navigate_to("MAIN_MENU", market="PK")
 
-    st.write("")
+        st.write("")
 
-    # International Stocks
-    st.success("### 🌐 International Stocks\nDedicated ledger for US & global equities with country tags and foreign CGT rates.")
-    if st.button("Open International Portfolio"):
-        navigate_to("MAIN_MENU", market="INTL")
+        st.success("### 🌐 International Stocks\nTrack US & global equities with country tags, multi-currency flows, and tax deductions.")
+        if st.button("Open International Portfolio", use_container_width=True):
+            navigate_to("MAIN_MENU", market="INTL")
 
     st.stop()
 
@@ -322,55 +325,49 @@ def load_cash():
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 9. ONE-LINE SEQUENTIAL OPTIONS MENU
+# 9. SINGLE COLUMN CENTERED OPTIONS MENU (Same Size, Centered, One per Row)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MAIN_MENU":
-    st.markdown("<h2 style='text-align:center;'>Management Options</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; margin-bottom: 20px;'>Management Options</h2>", unsafe_allow_html=True)
 
-    # 1. Green Purchase Record
-    if st.button("➕ Purchase Record"):
-        navigate_to("PURCHASE")
+    # Centered container for buttons
+    _, menu_col, _ = st.columns([1, 2.5, 1])
+    with menu_col:
+        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
 
-    # 2. Red Sell Record
-    if st.button("➖ Sell Record"):
-        navigate_to("SELL")
+        if st.button("➕ Purchase Record"):
+            navigate_to("PURCHASE")
 
-    # 3. Cash Flow - Deposit
-    if st.button("📥 Deposit"):
-        navigate_to("DEPOSIT")
+        if st.button("➖ Sell Record"):
+            navigate_to("SELL")
 
-    # 4. Cash Flow - Withdrawal
-    if st.button("📤 Withdrawal"):
-        navigate_to("WITHDRAWAL")
+        if st.button("📥 Deposit"):
+            navigate_to("DEPOSIT")
 
-    # PC-only extended options
-    st.markdown('<div class="pc-only-module">', unsafe_allow_html=True)
+        if st.button("📤 Withdrawal"):
+            navigate_to("WITHDRAWAL")
 
-    # 5. Blue Weekly Summary
-    if st.button("📅 Weekly Summary"):
-        navigate_to("WEEKLY")
+        st.markdown('<div class="pc-only-module" style="width: 100%;">', unsafe_allow_html=True)
 
-    # 6. Blue Monthly Summary
-    if st.button("🗓️ Monthly Summary"):
-        navigate_to("MONTHLY")
+        if st.button("📅 Weekly Summary"):
+            navigate_to("WEEKLY")
 
-    # 7. Blue Annual Performance
-    if st.button("🏆 Annual Performance"):
-        navigate_to("ANNUAL")
+        if st.button("🗓️ Monthly Summary"):
+            navigate_to("MONTHLY")
 
-    # 8. Blue Capital Gain Tax
-    if st.button("📊 Capital Gain Tax"):
-        navigate_to("CGT")
+        if st.button("🏆 Annual Performance"):
+            navigate_to("ANNUAL")
 
-    # 9. Grey Edit
-    if st.button("✏️ Edit"):
-        navigate_to("EDIT")
+        if st.button("📊 Capital Gain Tax"):
+            navigate_to("CGT")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("✏️ Edit"):
+            navigate_to("EDIT")
 
-    # Search Open Holdings
+        st.markdown('</div></div>', unsafe_allow_html=True)
+
     st.write("---")
-    st.subheader("🔍 Current Open Holdings")
+    st.subheader("🔍 Open Stock Holdings")
     buys_df = load_buys()
     search_sym = st.text_input("Search Stock Symbol:", "").strip().upper()
     if not buys_df.empty:
@@ -391,7 +388,7 @@ if st.session_state.current_page == "MAIN_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. SUBPAGES & DATA ENTRY
+# 10. SUBPAGES & ENTRY FORMS
 # ------------------------------------------------------------------------------
 
 # PAGE: PURCHASE RECORD
@@ -512,7 +509,7 @@ elif st.session_state.current_page == "SELL":
         else:
             st.info("No available shares found.")
 
-# PAGE: DEPOSIT & WITHDRAWAL (Corrected Payload Execution)
+# PAGE: DEPOSIT & WITHDRAWAL
 elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
     flow_kind = st.session_state.current_page
     st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
@@ -529,7 +526,6 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
 
         save_c = st.form_submit_button("Save Transaction")
         if save_c:
-            # Fully sanitized payload formatted directly for PostgreSQL types
             payload = {
                 "market": str(MARKET),
                 "country": str(c_country),
