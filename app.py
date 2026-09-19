@@ -7,7 +7,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
-# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED DIALOG
+# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
 # ------------------------------------------------------------------------------
 components.html("""
 <script>
@@ -32,11 +32,11 @@ components.html("""
 """, height=0)
 
 # ------------------------------------------------------------------------------
-# 2. BUTTONS STYLED TO EXACTLY HALF THE SCREEN WIDTH (50vw) & CENTERED
+# 2. FULL SCREEN-WIDTH OPTION BUTTONS (EXCLUDING HEADER CONTROLS)
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Center wrapper for menu layouts */
+    /* Option button menu container */
     .button-center-col {
         display: flex;
         flex-direction: column;
@@ -46,7 +46,7 @@ st.markdown("""
         margin-top: 15px;
     }
 
-    /* Force all primary/action buttons to half of viewport screen width (50vw) */
+    /* Target ONLY option buttons & form submit buttons: Full Screen Width & Equal Height */
     .button-center-col div[data-testid="stButton"],
     div[data-testid="stFormSubmitButton"] {
         width: 100% !important;
@@ -56,15 +56,25 @@ st.markdown("""
 
     .button-center-col div[data-testid="stButton"] button,
     div[data-testid="stFormSubmitButton"] button {
-        width: 50vw !important;
-        min-width: 50vw !important;
-        max-width: 50vw !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
         height: 52px !important;
         font-size: 16px !important;
         font-weight: 600 !important;
-        margin: 8px auto !important;
+        margin: 8px 0px !important;
         border-radius: 8px !important;
         display: block !important;
+    }
+
+    /* Top persistent header buttons keep natural compact sizing */
+    .top-header-bar div[data-testid="stButton"] button {
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 38px !important;
+        font-size: 14px !important;
+        margin: 0 !important;
     }
 
     /* Green Purchase Button */
@@ -79,7 +89,7 @@ st.markdown("""
         color: white !important;
         border: none !important;
     }
-    /* Blue Analytics and Cash Buttons */
+    /* Blue Analytics, Market, and Cash Buttons */
     div[data-testid="stButton"] button:has-text("📅 Weekly Summary"),
     div[data-testid="stButton"] button:has-text("🗓️ Monthly Summary"),
     div[data-testid="stButton"] button:has-text("🏆 Annual Performance"),
@@ -223,8 +233,9 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 6. PERSISTENT GLOBAL TOP BAR
+# 6. PERSISTENT GLOBAL TOP BAR (Compact, Normal Header Size)
 # ------------------------------------------------------------------------------
+st.markdown('<div class="top-header-bar">', unsafe_allow_html=True)
 is_home_page = (st.session_state.current_page == "HOME" or st.session_state.market is None)
 
 if is_home_page:
@@ -275,6 +286,7 @@ else:
             st.session_state.nav_stack = []
             st.rerun()
 
+st.markdown('</div>', unsafe_allow_html=True)
 st.divider()
 
 # ------------------------------------------------------------------------------
@@ -309,7 +321,7 @@ if st.session_state.current_page == "CHANGE_PW":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 8. HOME: MARKET SELECTION (Buttons at 50vw)
+# 8. HOME: MARKET SELECTION SCREEN (Full Screen Width Buttons)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "HOME" or st.session_state.market is None:
     st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
@@ -353,7 +365,7 @@ def load_cash():
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 9. DEDICATED MARKET OPTIONS MENU PAGE (Buttons at 50vw)
+# 9. DEDICATED MARKET OPTIONS MENU PAGE (Full Screen Width Buttons)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MARKET_MENU":
     st.markdown(f"<h2 style='text-align:center;'>{'Pakistani' if MARKET == 'PK' else 'International'} Management Options</h2>", unsafe_allow_html=True)
@@ -413,7 +425,7 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. DEDICATED EDIT OPTIONS MENU PAGE (Buttons at 50vw)
+# 10. DEDICATED EDIT OPTIONS MENU PAGE (Full Screen Width Buttons)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "EDIT_MENU":
     st.markdown("<h2 style='text-align:center;'>✏️ Choose Record Type to Edit</h2>", unsafe_allow_html=True)
@@ -700,7 +712,7 @@ elif st.session_state.current_page == "CGT":
             st.dataframe(cgt_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# 13. EDIT & DELETE MANAGEMENT PAGES (With "⋮ Actions" Button)
+# 13. EDIT & DELETE MANAGEMENT PAGES (With "⋮ Actions" Popover)
 # ------------------------------------------------------------------------------
 
 # EDIT PURCHASES
