@@ -7,7 +7,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
-# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
+# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED DIALOG
 # ------------------------------------------------------------------------------
 components.html("""
 <script>
@@ -32,49 +32,45 @@ components.html("""
 """, height=0)
 
 # ------------------------------------------------------------------------------
-# 2. FULL SCREEN-WIDTH OPTION BUTTONS (EXCLUDING HEADER CONTROLS)
+# 2. STICKY TOP BAR & BUTTON STYLING (EXACT HALF SCREEN LENGTH & CENTERED)
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Option button menu container */
-    .button-center-col {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        margin-top: 15px;
+    /* 1. Reduce top margin on the whole application */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 2rem !important;
     }
 
-    /* Target ONLY option buttons & form submit buttons: Full Screen Width & Equal Height */
-    .button-center-col div[data-testid="stButton"],
-    div[data-testid="stFormSubmitButton"] {
-        width: 100% !important;
-        display: flex !important;
-        justify-content: center !important;
+    /* 2. Persistent Sticky Top Bar (Stays on screen while scrolling) */
+    .sticky-header-container {
+        position: -webkit-sticky;
+        position: sticky;
+        top: 0;
+        z-index: 9999;
+        background-color: #0e1117;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        margin-bottom: 12px;
+        border-bottom: 1px solid #262730;
     }
 
-    .button-center-col div[data-testid="stButton"] button,
-    div[data-testid="stFormSubmitButton"] button {
+    /* Top bar buttons keep compact, natural sizing */
+    .sticky-header-container div[data-testid="stButton"] button {
         width: 100% !important;
-        min-width: 100% !important;
-        max-width: 100% !important;
+        height: 38px !important;
+        font-size: 13px !important;
+        margin: 0 !important;
+        padding: 0px 4px !important;
+    }
+
+    /* 3. Force all option buttons to equal height & full column stretch */
+    .menu-button-box div[data-testid="stButton"] button {
         height: 52px !important;
         font-size: 16px !important;
         font-weight: 600 !important;
-        margin: 8px 0px !important;
+        margin: 6px 0px !important;
         border-radius: 8px !important;
-        display: block !important;
-    }
-
-    /* Top persistent header buttons keep natural compact sizing */
-    .top-header-bar div[data-testid="stButton"] button {
-        width: auto !important;
-        min-width: 0 !important;
-        max-width: 100% !important;
-        height: 38px !important;
-        font-size: 14px !important;
-        margin: 0 !important;
     }
 
     /* Green Purchase Button */
@@ -192,7 +188,7 @@ if not st.session_state.authenticated:
         with st.form("login_form"):
             email_in = st.text_input("Email")
             pass_in = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign In")
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
             if submitted:
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email_in, "password": pass_in})
@@ -206,17 +202,17 @@ if not st.session_state.authenticated:
                 except Exception as e:
                     st.error(f"Sign in failed: {str(e)}")
 
-        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
-        if st.button("Forgot Password?"):
-            st.session_state.auth_view = "FORGOT"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        _, f_col, _ = st.columns([1, 2, 1])
+        with f_col:
+            if st.button("Forgot Password?", use_container_width=True):
+                st.session_state.auth_view = "FORGOT"
+                st.rerun()
 
     elif st.session_state.auth_view == "FORGOT":
         st.write("Enter your email to receive recovery instructions.")
         with st.form("forgot_form"):
             reset_email = st.text_input("Email Address")
-            reset_submit = st.form_submit_button("Send Recovery Email")
+            reset_submit = st.form_submit_button("Send Recovery Email", use_container_width=True)
             if reset_submit:
                 try:
                     supabase.auth.reset_password_for_email(reset_email)
@@ -224,35 +220,35 @@ if not st.session_state.authenticated:
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
-        st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
-        if st.button("Back to Login"):
-            st.session_state.auth_view = "LOGIN"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        _, b_col, _ = st.columns([1, 2, 1])
+        with b_col:
+            if st.button("Back to Login", use_container_width=True):
+                st.session_state.auth_view = "LOGIN"
+                st.rerun()
 
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 6. PERSISTENT GLOBAL TOP BAR (Compact, Normal Header Size)
+# 6. PERSISTENT STICKY TOP BAR (Always Visible While Scrolling)
 # ------------------------------------------------------------------------------
-st.markdown('<div class="top-header-bar">', unsafe_allow_html=True)
+st.markdown('<div class="sticky-header-container">', unsafe_allow_html=True)
 is_home_page = (st.session_state.current_page == "HOME" or st.session_state.market is None)
 
 if is_home_page:
     col_home, col_title, col_pw, col_out = st.columns([1.5, 3.5, 2.5, 1.5])
     with col_home:
-        if st.button("🏠 Home"):
+        if st.button("🏠 Home", use_container_width=True):
             st.session_state.market = None
             st.session_state.current_page = "HOME"
             st.session_state.nav_stack = []
             st.rerun()
     with col_title:
-        st.markdown("<div style='text-align:center; font-weight:bold; font-size:17px; margin-top:8px;'>Portfolio Selection</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center; font-weight:bold; font-size:16px; margin-top:6px;'>Portfolio Selection</div>", unsafe_allow_html=True)
     with col_pw:
-        if st.button("🔑 Change Password"):
+        if st.button("🔑 Password", use_container_width=True):
             navigate_to("CHANGE_PW")
     with col_out:
-        if st.button("🚪 Logout"):
+        if st.button("🚪 Logout", use_container_width=True):
             supabase.auth.sign_out()
             st.session_state.authenticated = False
             st.session_state.user_email = ""
@@ -263,21 +259,21 @@ if is_home_page:
 else:
     col_home, col_back, col_title, col_stat, col_out = st.columns([1.2, 1.2, 3.8, 1.8, 1.4])
     with col_home:
-        if st.button("🏠 Home"):
+        if st.button("🏠 Home", use_container_width=True):
             st.session_state.market = None
             st.session_state.current_page = "HOME"
             st.session_state.nav_stack = []
             st.rerun()
     with col_back:
-        if st.button("⬅️ Back"):
+        if st.button("⬅️ Back", use_container_width=True):
             go_back()
     with col_title:
         badge = "Pakistani Stocks" if st.session_state.market == "PK" else "International Stocks"
-        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:17px; margin-top:8px;'>{badge}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:16px; margin-top:6px;'>{badge}</div>", unsafe_allow_html=True)
     with col_stat:
-        st.button("🔐 Logged In", disabled=True)
+        st.button("🔐 Online", disabled=True, use_container_width=True)
     with col_out:
-        if st.button("🚪 Logout"):
+        if st.button("🚪 Logout", use_container_width=True):
             supabase.auth.sign_out()
             st.session_state.authenticated = False
             st.session_state.user_email = ""
@@ -287,7 +283,6 @@ else:
             st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
-st.divider()
 
 # ------------------------------------------------------------------------------
 # 7. CHANGE PASSWORD VIEW
@@ -298,7 +293,7 @@ if st.session_state.current_page == "CHANGE_PW":
         st.write(f"Logged in user: **{st.session_state.user_email}**")
         new_pw = st.text_input("New Password", type="password")
         conf_pw = st.text_input("Confirm New Password", type="password")
-        submit_pw = st.form_submit_button("Update Password")
+        submit_pw = st.form_submit_button("Update Password", use_container_width=True)
 
         if submit_pw:
             if not new_pw or len(new_pw) < 6:
@@ -312,31 +307,33 @@ if st.session_state.current_page == "CHANGE_PW":
                 except Exception as e:
                     st.error(f"Failed to update password: {str(e)}")
 
-    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
-    if st.button("⬅️ Return to Home"):
-        st.session_state.market = None
-        st.session_state.current_page = "HOME"
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    _, ret_col, _ = st.columns([1, 2, 1])
+    with ret_col:
+        if st.button("⬅️ Return to Home", use_container_width=True):
+            st.session_state.market = None
+            st.session_state.current_page = "HOME"
+            st.rerun()
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 8. HOME: MARKET SELECTION SCREEN (Full Screen Width Buttons)
+# 8. HOME: MARKET SELECTION (Half-Width Centered Buttons)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "HOME" or st.session_state.market is None:
-    st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; margin-bottom: 20px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
 
-    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
-    st.info("### 🇵🇰 Pakistani Stocks\nTrack domestic equities, local cash flows, and FBR capital gains taxes.")
-    if st.button("Open Pakistani Portfolio"):
-        navigate_to("MARKET_MENU", market="PK")
+    _, center_box, _ = st.columns([1, 2, 1])
+    with center_box:
+        st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
+        st.info("### 🇵🇰 Pakistani Stocks\nDomestic shares, cash balances, and local taxes.")
+        if st.button("Open Pakistani Portfolio", use_container_width=True):
+            navigate_to("MARKET_MENU", market="PK")
 
-    st.write("")
+        st.write("")
 
-    st.success("### 🌐 International Stocks\nTrack US & global equities with country tags, multi-currency flows, and tax deductions.")
-    if st.button("Open International Portfolio"):
-        navigate_to("MARKET_MENU", market="INTL")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.success("### 🌐 International Stocks\nUS & global equities with country tags and foreign CGT.")
+        if st.button("Open International Portfolio", use_container_width=True):
+            navigate_to("MARKET_MENU", market="INTL")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.stop()
 
@@ -365,43 +362,46 @@ def load_cash():
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 9. DEDICATED MARKET OPTIONS MENU PAGE (Full Screen Width Buttons)
+# 9. DEDICATED MARKET OPTIONS MENU PAGE (Half-Width Centered Buttons)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MARKET_MENU":
     st.markdown(f"<h2 style='text-align:center;'>{'Pakistani' if MARKET == 'PK' else 'International'} Management Options</h2>", unsafe_allow_html=True)
 
-    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
+    # Ratio [1, 2, 1] sets the middle column to exactly 50% of screen width
+    _, btn_center_col, _ = st.columns([1, 2, 1])
+    with btn_center_col:
+        st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
 
-    if st.button("➕ Purchase Record"):
-        navigate_to("PURCHASE")
+        if st.button("➕ Purchase Record", use_container_width=True):
+            navigate_to("PURCHASE")
 
-    if st.button("➖ Sell Record"):
-        navigate_to("SELL")
+        if st.button("➖ Sell Record", use_container_width=True):
+            navigate_to("SELL")
 
-    if st.button("📥 Deposit"):
-        navigate_to("DEPOSIT")
+        if st.button("📥 Deposit", use_container_width=True):
+            navigate_to("DEPOSIT")
 
-    if st.button("📤 Withdrawal"):
-        navigate_to("WITHDRAWAL")
+        if st.button("📤 Withdrawal", use_container_width=True):
+            navigate_to("WITHDRAWAL")
 
-    st.markdown('<div class="pc-only-module button-center-col" style="margin-top:0;">', unsafe_allow_html=True)
+        st.markdown('<div class="pc-only-module">', unsafe_allow_html=True)
 
-    if st.button("📅 Weekly Summary"):
-        navigate_to("WEEKLY")
+        if st.button("📅 Weekly Summary", use_container_width=True):
+            navigate_to("WEEKLY")
 
-    if st.button("🗓️ Monthly Summary"):
-        navigate_to("MONTHLY")
+        if st.button("🗓️ Monthly Summary", use_container_width=True):
+            navigate_to("MONTHLY")
 
-    if st.button("🏆 Annual Performance"):
-        navigate_to("ANNUAL")
+        if st.button("🏆 Annual Performance", use_container_width=True):
+            navigate_to("ANNUAL")
 
-    if st.button("📊 Capital Gain Tax"):
-        navigate_to("CGT")
+        if st.button("📊 Capital Gain Tax", use_container_width=True):
+            navigate_to("CGT")
 
-    if st.button("✏️ Edit"):
-        navigate_to("EDIT_MENU")
+        if st.button("✏️ Edit", use_container_width=True):
+            navigate_to("EDIT_MENU")
 
-    st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
 
     st.write("---")
     st.subheader("🔍 Current Open Holdings")
@@ -425,26 +425,29 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. DEDICATED EDIT OPTIONS MENU PAGE (Full Screen Width Buttons)
+# 10. DEDICATED EDIT OPTIONS MENU PAGE (Half-Width Centered Buttons)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "EDIT_MENU":
     st.markdown("<h2 style='text-align:center;'>✏️ Choose Record Type to Edit</h2>", unsafe_allow_html=True)
 
-    st.markdown('<div class="button-center-col">', unsafe_allow_html=True)
+    # Ratio [1, 2, 1] sets the middle column to exactly 50% of screen width
+    _, edit_btn_col, _ = st.columns([1, 2, 1])
+    with edit_btn_col:
+        st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
 
-    if st.button("📝 Edit Purchases"):
-        navigate_to("EDIT_PURCHASES")
+        if st.button("📝 Edit Purchases", use_container_width=True):
+            navigate_to("EDIT_PURCHASES")
 
-    if st.button("📝 Edit Sells"):
-        navigate_to("EDIT_SELLS")
+        if st.button("📝 Edit Sells", use_container_width=True):
+            navigate_to("EDIT_SELLS")
 
-    if st.button("📝 Edit Deposits"):
-        navigate_to("EDIT_DEPOSITS")
+        if st.button("📝 Edit Deposits", use_container_width=True):
+            navigate_to("EDIT_DEPOSITS")
 
-    if st.button("📝 Edit Withdrawals"):
-        navigate_to("EDIT_WITHDRAWALS")
+        if st.button("📝 Edit Withdrawals", use_container_width=True):
+            navigate_to("EDIT_WITHDRAWALS")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # ------------------------------------------------------------------------------
@@ -475,7 +478,7 @@ if st.session_state.current_page == "PURCHASE":
         fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, step=1.0, format="%.2f")
         taxes = st.number_input(f"Levies / Taxes ({CURRENCY})", min_value=0.0, step=1.0, format="%.2f")
 
-        save_p = st.form_submit_button("Save Purchase Changes")
+        save_p = st.form_submit_button("Save Purchase Changes", use_container_width=True)
         if save_p:
             if not sym or not s_name:
                 st.error("Please enter both Stock Symbol and Stock Name.")
@@ -531,7 +534,7 @@ elif st.session_state.current_page == "SELL":
                 sell_fees = st.number_input(f"Selling Fees ({CURRENCY})", min_value=0.0, step=1.0, format="%.2f")
                 cgt_rate = st.number_input("Capital Gain Tax %", min_value=0.0, max_value=100.0, value=15.0, step=0.5)
 
-                save_s = st.form_submit_button("Save Sell Changes")
+                save_s = st.form_submit_button("Save Sell Changes", use_container_width=True)
                 if save_s:
                     if shares_to_sell > avail:
                         st.error("❌ Sale quantity exceeds available shares!")
@@ -584,7 +587,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.01, step=100.0, format="%.2f")
         memo = st.text_input("Notes (Bank reference, wallet ID, etc.)")
 
-        save_c = st.form_submit_button("Save Transaction")
+        save_c = st.form_submit_button("Save Transaction", use_container_width=True)
         if save_c:
             payload = {
                 "market": str(MARKET),
@@ -760,7 +763,7 @@ elif st.session_state.current_page == "EDIT_PURCHASES":
                     tx_val = st.number_input("Taxes", value=float(item["taxes"]))
                     rem_val = st.number_input("Shares Remaining", value=float(item["shares_remaining"]))
 
-                    if st.form_submit_button("Save Changes"):
+                    if st.form_submit_button("Save Changes", use_container_width=True):
                         new_tot = (sh_val * pr_val) + fe_val + tx_val
                         payload = {
                             "symbol": sym_val,
@@ -822,7 +825,7 @@ elif st.session_state.current_page == "EDIT_SELLS":
                     ss_fe = st.number_input("Selling Fees", value=float(item["selling_fees"]))
                     ss_rt = st.number_input("CGT Rate %", value=float(item["cgt_rate"]))
 
-                    if st.form_submit_button("Save Changes"):
+                    if st.form_submit_button("Save Changes", use_container_width=True):
                         gross = (ss_sh * ss_sp) - (ss_sh * ss_bp) - ss_fe
                         cgt = (gross * (ss_rt / 100.0)) if gross > 0 else 0.0
                         net = gross - cgt
@@ -878,7 +881,7 @@ elif st.session_state.current_page == "EDIT_DEPOSITS":
                     t_amt = st.number_input("Amount", value=float(item["amount"]))
                     t_memo = st.text_input("Notes", value=item["notes"] or "")
 
-                    if st.form_submit_button("Save Changes"):
+                    if st.form_submit_button("Save Changes", use_container_width=True):
                         payload = {
                             "entry_date": t_date.strftime("%Y-%m-%d"),
                             "amount": float(t_amt),
@@ -923,7 +926,7 @@ elif st.session_state.current_page == "EDIT_WITHDRAWALS":
                     t_amt = st.number_input("Amount", value=float(item["amount"]))
                     t_memo = st.text_input("Notes", value=item["notes"] or "")
 
-                    if st.form_submit_button("Save Changes"):
+                    if st.form_submit_button("Save Changes", use_container_width=True):
                         payload = {
                             "entry_date": t_date.strftime("%Y-%m-%d"),
                             "amount": float(t_amt),
