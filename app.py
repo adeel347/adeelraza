@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, time
 from supabase import create_client, Client
@@ -9,7 +8,7 @@ st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout
 # ------------------------------------------------------------------------------
 # 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
 # ------------------------------------------------------------------------------
-components.html("""
+st.html("""
 <script>
     const parentWin = window.parent;
     parentWin.addEventListener('beforeunload', (event) => {
@@ -29,7 +28,7 @@ components.html("""
         }
     };
 </script>
-""", height=0)
+""")
 
 # ------------------------------------------------------------------------------
 # 2. CSS STYLING
@@ -468,7 +467,7 @@ if st.session_state.current_page == "MARKET_MENU":
     st.write("---")
     st.subheader("🔍 Current Open Holdings")
     buys_df = load_buys()
-    search_sym = st.text_input("Search Stock Symbol:", "").strip().upper()
+    search_sym = st.text_input("Search Stock Symbol:", value="").strip().upper()
     
     if not buys_df.empty:
         open_lots = buys_df[buys_df["shares_remaining"] > 0].copy()
@@ -515,7 +514,7 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. ENTRY SUBPAGES WITH FREE CASH VALIDATION ON ADD & EDIT
+# 10. ENTRY SUBPAGES
 # ------------------------------------------------------------------------------
 
 # PURCHASE ENTRY
@@ -530,16 +529,18 @@ if st.session_state.current_page == "PURCHASE":
     with st.form("purchase_form"):
         st.warning("⚠️ Changes are NOT saved until you click 'Save Purchase Changes' below.")
         p_date = st.date_input("Purchase Date", value=date.today())
+        
         country_val = "Pakistan"
         if MARKET == "INTL":
-            country_val = st.text_input("Country", value=None, placeholder="e.g., United States").strip() if country_val else "Pakistan"
+            country_val = st.text_input("Country", value="", placeholder="e.g., United States")
 
-        sym = st.text_input("Stock Symbol", value=None, placeholder="e.g., SYS, OGDC, AAPL")
-        s_name = st.text_input("Stock Name", value=None, placeholder="e.g., Systems Limited, Apple Inc.")
+        sym = st.text_input("Stock Symbol", value="", placeholder="e.g., SYS, OGDC, AAPL")
+        s_name = st.text_input("Stock Name", value="", placeholder="e.g., Systems Limited, Apple Inc.")
 
         if sym and sym.strip().upper() in existing_symbols:
             st.info(f"ℹ️ {sym.strip().upper()} exists in your holdings. This entry adds to your total shares.")
 
+        # Correct blank inputs: value=None with placeholder for numbers
         shares = st.number_input("Number of Shares", min_value=0.0, value=None, step=1.0, format="%.4f", placeholder="Enter number of shares")
         price = st.number_input(f"Purchase Price per Share ({CURRENCY})", min_value=0.0, value=None, step=0.5, format="%.2f", placeholder="Enter purchase price")
         fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, value=None, step=1.0, format="%.2f", placeholder="Enter fees (if any)")
@@ -549,6 +550,7 @@ if st.session_state.current_page == "PURCHASE":
         if save_p:
             clean_sym = sym.strip().upper() if sym else ""
             clean_name = s_name.strip() if s_name else ""
+            clean_country = country_val.strip() if country_val else "Pakistan"
             val_shares = float(shares) if shares is not None else 0.0
             val_price = float(price) if price is not None else 0.0
             val_fees = float(fees) if fees is not None else 0.0
@@ -561,13 +563,12 @@ if st.session_state.current_page == "PURCHASE":
             else:
                 total_val = (val_shares * val_price) + val_fees + val_taxes
 
-                # STRICT CASH CHECK ON NEW PURCHASE
                 if total_val > free_cash:
                     st.error(f"❌ Insufficient Free Cash! Available: {CURRENCY} {free_cash:,.2f} | Required: {CURRENCY} {total_val:,.2f}. Free cash cannot go negative.")
                 else:
                     payload = {
                         "market": str(MARKET),
-                        "country": str(country_val) if country_val else "Pakistan",
+                        "country": clean_country,
                         "purchase_date": p_date.strftime("%Y-%m-%d"),
                         "symbol": clean_sym,
                         "stock_name": clean_name,
@@ -625,7 +626,6 @@ if st.session_state.current_page == "PURCHASE":
                         st.success(f"Deleted Purchase Record #{seq_num}")
                         st.rerun()
 
-            # INLINE PURCHASE EDIT WITH STRICT CASH VALIDATION
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_buy_{item_id}"):
                     st.write(f"Editing Purchase Record #{seq_num}")
@@ -641,15 +641,11 @@ if st.session_state.current_page == "PURCHASE":
                         new_tot = (sh_val * pr_val) + fe_val + tx_val
                         old_tot = float(item["total_cost"])
                         delta_cost = new_tot - old_tot
-
-                        # Recalculate live free cash
                         curr_free_cash, _ = calculate_financials()
 
-                        # STRICT VALIDATION: Check if edit pushes free cash into negative
                         if delta_cost > curr_free_cash:
-                            st.error(f"❌ Insufficient Free Cash to update! Extra cost: {CURRENCY} {delta_cost:,.2f} | Available Free Cash: {CURRENCY} {curr_free_cash:,.2f}. Free cash cannot go negative.")
+                            st.error(f"❌ Insufficient Free Cash! Extra cost: {CURRENCY} {delta_cost:,.2f} | Available: {CURRENCY} {curr_free_cash:,.2f}. Free cash cannot go negative.")
                         else:
-                            # Adjust remaining shares proportionally if shares bought was changed
                             sold_shares = float(item["shares_bought"]) - float(item["shares_remaining"])
                             new_remaining = max(0.0, sh_val - sold_shares)
 
@@ -836,7 +832,7 @@ elif st.session_state.current_page == "SELL":
     else:
         st.info("No completed sales recorded yet.")
 
-# DEPOSIT & WITHDRAWAL ENTRY (STRICT CASH CHECKS)
+# DEPOSIT & WITHDRAWAL ENTRY
 elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
     flow_kind = st.session_state.current_page
     st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
@@ -847,25 +843,27 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         st.warning("⚠️ Changes are NOT saved until you click 'Save Transaction' below.")
         e_date = st.date_input("Transaction Date", value=date.today())
         e_time = st.time_input("Transaction Time", value=time(12, 0))
+        
         c_country = "Pakistan"
         if MARKET == "INTL":
-            c_country = st.text_input("Origin/Destination Country", value=None, placeholder="e.g., United States").strip() if c_country else "Pakistan"
+            # Fix: Use value="" instead of value=None to avoid AttributeError[cite: 7, 10]
+            c_country = st.text_input("Origin/Destination Country", value="", placeholder="e.g., United States")
 
         amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, value=None, step=100.0, format="%.2f", placeholder="Enter amount")
-        memo = st.text_input("Notes (Bank reference, wallet ID, etc.)", value=None, placeholder="Optional notes")
+        memo = st.text_input("Notes (Bank reference, wallet ID, etc.)", value="", placeholder="Optional notes")
 
         save_c = st.form_submit_button("Save Transaction", use_container_width=True)
         if save_c:
             val_amt = float(amt) if amt is not None else 0.0
+            clean_c_country = c_country.strip() if c_country else "Pakistan"
             if val_amt <= 0:
                 st.error("Please enter a valid amount greater than 0.")
-            # STRICT CHECK ON WITHDRAWAL: Cannot withdraw more than liquid free cash
             elif flow_kind == "WITHDRAWAL" and val_amt > free_cash:
                 st.error(f"❌ Insufficient Free Cash! Available: {CURRENCY} {free_cash:,.2f} | Requested: {CURRENCY} {val_amt:,.2f}. Free cash cannot go negative.")
             else:
                 payload = {
                     "market": str(MARKET),
-                    "country": str(c_country) if c_country else "Pakistan",
+                    "country": clean_c_country,
                     "entry_date": e_date.strftime("%Y-%m-%d"),
                     "entry_time": e_time.strftime("%H:%M:%S"),
                     "flow_type": str(flow_kind),
@@ -914,15 +912,13 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
                     if st.button("✏️ Edit", key=f"btn_edit_cf_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_cf_{item_id}", use_container_width=True):
-                        # Block deleting a deposit if it would cause free cash to become negative
                         if item["flow_type"] == "DEPOSIT" and float(item["amount"]) > free_cash:
-                            st.error(f"❌ Cannot delete this deposit! Doing so would cause free cash to become negative ({CURRENCY} {free_cash - float(item['amount']):,.2f}).")
+                            st.error(f"❌ Cannot delete this deposit! Free cash would become negative ({CURRENCY} {free_cash - float(item['amount']):,.2f}).")
                         else:
                             supabase.table("cash_flows").delete().eq("id", item_id).execute()
                             st.success(f"Deleted {flow_kind.capitalize()} Record #{seq_num}")
                             st.rerun()
 
-            # INLINE CASH EDIT WITH STRICT VALIDATION
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_cf_{item_id}"):
                     t_date = st.date_input("Date", value=pd.to_datetime(item["entry_date"]).date())
@@ -934,10 +930,8 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
                         new_amt = float(t_amt)
                         old_amt = float(item["amount"])
 
-                        # If editing withdrawal upwards, ensure sufficient free cash
                         if flow_kind == "WITHDRAWAL" and (new_amt - old_amt) > live_free_cash:
                             st.error(f"❌ Cannot increase withdrawal! Additional amount exceeds available Free Cash ({CURRENCY} {live_free_cash:,.2f}).")
-                        # If editing deposit downwards, ensure free cash doesn't fall below zero
                         elif flow_kind == "DEPOSIT" and (old_amt - new_amt) > live_free_cash:
                             st.error(f"❌ Cannot decrease deposit! Free cash would drop below zero ({CURRENCY} {live_free_cash - (old_amt - new_amt):,.2f}).")
                         else:
@@ -954,7 +948,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         st.info(f"No {flow_kind.lower()} transactions recorded yet.")
 
 # ------------------------------------------------------------------------------
-# 11. REPORTING PAGES (Native Bordered Tables with Sequential Numbering)
+# 11. REPORTING PAGES
 # ------------------------------------------------------------------------------
 
 # WEEKLY SUMMARY
