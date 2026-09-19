@@ -7,7 +7,7 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
-# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED DIALOG
+# 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
 # ------------------------------------------------------------------------------
 components.html("""
 <script>
@@ -32,17 +32,17 @@ components.html("""
 """, height=0)
 
 # ------------------------------------------------------------------------------
-# 2. STICKY TOP BAR & BUTTON STYLING (EXACT HALF SCREEN LENGTH & CENTERED)
+# 2. CSS STYLING
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* 1. Reduce top margin on the whole application */
+    /* Reduce top padding */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 2rem !important;
     }
 
-    /* 2. Persistent Sticky Top Bar (Stays on screen while scrolling) */
+    /* Persistent Sticky Top Header */
     .sticky-header-container {
         position: -webkit-sticky;
         position: sticky;
@@ -55,7 +55,6 @@ st.markdown("""
         border-bottom: 1px solid #262730;
     }
 
-    /* Top bar buttons keep compact, natural sizing */
     .sticky-header-container div[data-testid="stButton"] button {
         width: 100% !important;
         height: 38px !important;
@@ -64,13 +63,41 @@ st.markdown("""
         padding: 0px 4px !important;
     }
 
-    /* 3. Force all option buttons to equal height & full column stretch */
+    /* Menu container holding half-screen action buttons */
     .menu-button-box div[data-testid="stButton"] button {
         height: 52px !important;
         font-size: 16px !important;
         font-weight: 600 !important;
         margin: 6px 0px !important;
         border-radius: 8px !important;
+    }
+
+    /* Sign In form button standard sizing */
+    .login-form-box div[data-testid="stFormSubmitButton"] button {
+        width: 160px !important;
+        height: 42px !important;
+        font-size: 15px !important;
+        margin: 10px auto !important;
+        display: block !important;
+        border-radius: 6px !important;
+    }
+
+    /* Market Selector Buttons: Green for Pakistani, Blue for International */
+    div[data-testid="stButton"] button:has-text("Pakistani Stocks") {
+        background-color: #10b981 !important;
+        color: white !important;
+        border: none !important;
+        height: 56px !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+    }
+    div[data-testid="stButton"] button:has-text("International Stocks") {
+        background-color: #2563eb !important;
+        color: white !important;
+        border: none !important;
+        height: 56px !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
     }
 
     /* Green Purchase Button */
@@ -85,7 +112,7 @@ st.markdown("""
         color: white !important;
         border: none !important;
     }
-    /* Blue Analytics, Market, and Cash Buttons */
+    /* Blue Analytics and Cash Buttons */
     div[data-testid="stButton"] button:has-text("📅 Weekly Summary"),
     div[data-testid="stButton"] button:has-text("🗓️ Monthly Summary"),
     div[data-testid="stButton"] button:has-text("🏆 Annual Performance"),
@@ -95,9 +122,7 @@ st.markdown("""
     div[data-testid="stButton"] button:has-text("📝 Edit Purchases"),
     div[data-testid="stButton"] button:has-text("📝 Edit Sells"),
     div[data-testid="stButton"] button:has-text("📝 Edit Deposits"),
-    div[data-testid="stButton"] button:has-text("📝 Edit Withdrawals"),
-    div[data-testid="stButton"] button:has-text("Open Pakistani Portfolio"),
-    div[data-testid="stButton"] button:has-text("Open International Portfolio") {
+    div[data-testid="stButton"] button:has-text("📝 Edit Withdrawals") {
         background-color: #2563eb !important;
         color: white !important;
         border: none !important;
@@ -109,7 +134,29 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Entry card container */
+    /* Equity KPI Highlight Banner */
+    .equity-card {
+        background: linear-gradient(135deg, #1e293b, #0f172a);
+        border: 1px solid #3b82f6;
+        border-radius: 10px;
+        padding: 16px;
+        text-align: center;
+        margin-bottom: 16px;
+    }
+    .equity-title {
+        color: #94a3b8;
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .equity-val {
+        color: #f8fafc;
+        font-size: 28px;
+        font-weight: 800;
+        margin-top: 4px;
+    }
+
     .entry-card {
         background-color: #1e293b;
         border: 1px solid #334155;
@@ -118,7 +165,6 @@ st.markdown("""
         margin-bottom: 8px;
     }
 
-    /* Mobile query to restrict desktop extras */
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -185,10 +231,11 @@ def go_back():
 if not st.session_state.authenticated:
     st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal Login</h2>", unsafe_allow_html=True)
     if st.session_state.auth_view == "LOGIN":
+        st.markdown('<div class="login-form-box">', unsafe_allow_html=True)
         with st.form("login_form"):
             email_in = st.text_input("Email")
             pass_in = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign In", use_container_width=True)
+            submitted = st.form_submit_button("Sign In")
             if submitted:
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email_in, "password": pass_in})
@@ -201,6 +248,7 @@ if not st.session_state.authenticated:
                         st.rerun()
                 except Exception as e:
                     st.error(f"Sign in failed: {str(e)}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
         _, f_col, _ = st.columns([1, 2, 1])
         with f_col:
@@ -229,7 +277,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 6. PERSISTENT STICKY TOP BAR (Always Visible While Scrolling)
+# 6. PERSISTENT STICKY TOP BAR
 # ------------------------------------------------------------------------------
 st.markdown('<div class="sticky-header-container">', unsafe_allow_html=True)
 is_home_page = (st.session_state.current_page == "HOME" or st.session_state.market is None)
@@ -271,7 +319,7 @@ else:
         badge = "Pakistani Stocks" if st.session_state.market == "PK" else "International Stocks"
         st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:16px; margin-top:6px;'>{badge}</div>", unsafe_allow_html=True)
     with col_stat:
-        st.button("🔐 Logged in", disabled=True, use_container_width=True)
+        st.button("🔐 Logged In", disabled=True, use_container_width=True)
     with col_out:
         if st.button("🚪 Logout", use_container_width=True):
             supabase.auth.sign_out()
@@ -316,22 +364,20 @@ if st.session_state.current_page == "CHANGE_PW":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 8. HOME: MARKET SELECTION (Half-Width Centered Buttons)
+# 8. HOME: MARKET SELECTION (Direct Green/Blue Buttons, No Emojis, No Extra Text)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "HOME" or st.session_state.market is None:
-    st.markdown("<h2 style='text-align:center; margin-bottom: 20px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
 
     _, center_box, _ = st.columns([1, 2, 1])
     with center_box:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
-        st.info("### Pakistani Stocks")
-        if st.button("Open Pakistani Portfolio", use_container_width=True):
+        if st.button("Pakistani Stocks", use_container_width=True):
             navigate_to("MARKET_MENU", market="PK")
 
         st.write("")
 
-        st.success("###  International Stocks")
-        if st.button("Open International Portfolio", use_container_width=True):
+        if st.button("International Stocks", use_container_width=True):
             navigate_to("MARKET_MENU", market="INTL")
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -361,13 +407,31 @@ def load_cash():
     except Exception:
         return pd.DataFrame()
 
+# Helper: Compute Market Equity
+def calculate_equity():
+    cash_df = load_cash()
+    sells_df = load_sells()
+
+    total_dep = cash_df[cash_df["flow_type"] == "DEPOSIT"]["amount"].sum() if not cash_df.empty else 0.0
+    total_wth = cash_df[cash_df["flow_type"] == "WITHDRAWAL"]["amount"].sum() if not cash_df.empty else 0.0
+    net_realized_pnl = sells_df["net_pnl"].sum() if not sells_df.empty else 0.0
+
+    return (total_dep - total_wth) + net_realized_pnl
+
 # ------------------------------------------------------------------------------
-# 9. DEDICATED MARKET OPTIONS MENU PAGE (Half-Width Centered Buttons)
+# 9. DEDICATED MARKET OPTIONS MENU PAGE
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MARKET_MENU":
-    st.markdown(f"<h2 style='text-align:center;'>{'Pakistani' if MARKET == 'PK' else 'International'} Management Options</h2>", unsafe_allow_html=True)
+    # 1. Total Equity Card above buttons
+    market_equity = calculate_equity()
+    st.markdown(f"""
+    <div class="equity-card">
+        <div class="equity-title">Total Portfolio Equity ({'Pakistani Stocks' if MARKET == 'PK' else 'International Stocks'})</div>
+        <div class="equity-val">{CURRENCY} {market_equity:,.2f}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Ratio [1, 2, 1] sets the middle column to exactly 50% of screen width
+    # 2. Centered Half-Width Buttons [1, 2, 1]
     _, btn_center_col, _ = st.columns([1, 2, 1])
     with btn_center_col:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
@@ -425,12 +489,11 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. DEDICATED EDIT OPTIONS MENU PAGE (Half-Width Centered Buttons)
+# 10. DEDICATED EDIT OPTIONS MENU PAGE
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "EDIT_MENU":
     st.markdown("<h2 style='text-align:center;'>✏️ Choose Record Type to Edit</h2>", unsafe_allow_html=True)
 
-    # Ratio [1, 2, 1] sets the middle column to exactly 50% of screen width
     _, edit_btn_col, _ = st.columns([1, 2, 1])
     with edit_btn_col:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
@@ -715,7 +778,7 @@ elif st.session_state.current_page == "CGT":
             st.dataframe(cgt_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# 13. EDIT & DELETE MANAGEMENT PAGES (With "⋮ Actions" Popover)
+# 13. EDIT & DELETE MANAGEMENT PAGES
 # ------------------------------------------------------------------------------
 
 # EDIT PURCHASES
@@ -750,7 +813,6 @@ elif st.session_state.current_page == "EDIT_PURCHASES":
                         st.success(f"Deleted Lot #{item_id}")
                         st.rerun()
 
-            # Inline Edit Form
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_buy_{item_id}"):
                     st.write(f"Editing Purchase ID #{item_id}")
