@@ -151,6 +151,12 @@ st.markdown("""
         margin-top: 4px;
     }
 
+    .report-table-row {
+        background-color: #0f172a;
+        border-bottom: 1px solid #1e293b;
+        padding: 6px 0px;
+    }
+
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -637,7 +643,7 @@ if st.session_state.current_page == "PURCHASE":
     else:
         st.info("No purchases recorded yet.")
 
-# SELL ENTRY (Searchable Dropdown with clean, unique symbols only)
+# SELL ENTRY
 elif st.session_state.current_page == "SELL":
     st.header("➖ Sell Record Entry")
     buys_df = load_buys()
@@ -645,19 +651,15 @@ elif st.session_state.current_page == "SELL":
         st.warning("No purchase inventory available.")
     else:
         open_lots = buys_df[buys_df["shares_remaining"] > 0].copy()
-        
-        # Extract unique symbols only
         unique_symbols = sorted(open_lots["symbol"].unique().tolist()) if not open_lots.empty else []
 
         if unique_symbols:
-            # Searchable selectbox displaying only the stock symbol
             selected_symbol = st.selectbox(
                 "Select Stock Symbol to Sell:",
                 options=unique_symbols,
                 help="Type to search your available stock symbols"
             )
 
-            # Retrieve open lots for the selected symbol (FIFO order)
             symbol_lots = open_lots[open_lots["symbol"] == selected_symbol].sort_values(by="purchase_date").copy()
             total_avail_shares = float(symbol_lots["shares_remaining"].sum())
             first_lot = symbol_lots.iloc[0]
@@ -667,7 +669,6 @@ elif st.session_state.current_page == "SELL":
                 st.info(f"Selected: **{selected_symbol}** ({first_lot['stock_name']}) | Total Available: **{total_avail_shares:,.2f}** shares")
                 s_date = st.date_input("Sale Date", value=date.today())
 
-                # Zero defaults
                 shares_to_sell = st.number_input(f"Shares to Sell (Max: {total_avail_shares:,.2f})", min_value=0.0, max_value=total_avail_shares, value=0.0, step=1.0, format="%.4f")
                 sell_price = st.number_input(f"Selling Price per Share ({CURRENCY})", min_value=0.0, value=0.0, step=0.5, format="%.2f")
                 sell_fees = st.number_input(f"Selling Fees ({CURRENCY})", min_value=0.0, value=0.0, step=1.0, format="%.2f")
@@ -680,10 +681,7 @@ elif st.session_state.current_page == "SELL":
                     elif shares_to_sell > total_avail_shares:
                         st.error("❌ Sale quantity exceeds available shares!")
                     else:
-                        # FIFO Lot Execution
                         remaining_to_sell = shares_to_sell
-                        total_gross_pnl = 0.0
-                        total_tax = 0.0
                         total_net_pnl = 0.0
 
                         for _, lot_row in symbol_lots.iterrows():
@@ -696,7 +694,6 @@ elif st.session_state.current_page == "SELL":
                             cost_basis = shares_from_lot * unit_cost
                             gross_rev = shares_from_lot * sell_price
                             
-                            # Allocate fees proportionally
                             allocated_fee = (shares_from_lot / shares_to_sell) * sell_fees
                             lot_gross_pnl = gross_rev - cost_basis - allocated_fee
                             lot_tax = (lot_gross_pnl * (cgt_rate / 100.0)) if lot_gross_pnl > 0 else 0.0
@@ -902,7 +899,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         st.info(f"No {flow_kind.lower()} transactions recorded yet.")
 
 # ------------------------------------------------------------------------------
-# 11. REPORTING PAGES
+# 11. REPORTING PAGES (TABLE WITH TOP HEADER ROW & ENTRIES BELOW)
 # ------------------------------------------------------------------------------
 
 # WEEKLY SUMMARY
@@ -928,9 +925,37 @@ elif st.session_state.current_page == "WEEKLY":
             chosen_w = st.selectbox("Select Week Period (Latest first):", ["All Weeks"] + list(weeks))
             target = sells_df if chosen_w == "All Weeks" else sells_df[sells_df["Week_Label"] == chosen_w]
 
+            # Summary KPI row for the chosen week
+            tot_wk_gross = target["gross_pnl"].sum()
+            tot_wk_tax = target["cgt_tax"].sum()
+            tot_wk_net = target["net_pnl"].sum()
+
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("Gross P&L", f"{CURRENCY} {tot_wk_gross:,.2f}")
+            kpi2.metric("CGT Deducted", f"{CURRENCY} {tot_wk_tax:,.2f}")
+            kpi3.metric("Net Realized Gain/Loss", f"{CURRENCY} {tot_wk_net:,.2f}")
+
+            st.write("---")
+
+            # Structured Header Row
+            rh1, rh2, rh3, rh4, rh5, rh6 = st.columns([1.2, 1.8, 1, 1.5, 1.5, 1.2])
+            rh1.markdown("**Symbol**")
+            rh2.markdown("**Stock Name**")
+            rh3.markdown("**Shares**")
+            rh4.markdown("**Buy (Date @ Price)**")
+            rh5.markdown("**Sell (Date @ Price)**")
+            rh6.markdown("**Net Result**")
+
+            # Data Rows Below
             for _, row in target.sort_values(by="sale_date", ascending=False).iterrows():
-                emoji = "🟢 Profit" if row["net_pnl"] >= 0 else "🔴 Loss"
-                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {emoji} {CURRENCY} {row['net_pnl']:,.2f}")
+                emoji = "🟢" if row["net_pnl"] >= 0 else "🔴"
+                rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([1.2, 1.8, 1, 1.5, 1.5, 1.2])
+                rc1.write(f"{row['symbol']}")
+                rc2.write(f"{row['stock_name']}")
+                rc3.write(f"{row['shares_sold']:,.2f}")
+                rc4.write(f"{row['buy_date']} @ {row['buy_price']:,.2f}")
+                rc5.write(f"{row['sale_date']} @ {row['sale_price']:,.2f}")
+                rc6.write(f"{emoji} {row['net_pnl']:,.2f}")
 
 # MONTHLY SUMMARY
 elif st.session_state.current_page == "MONTHLY":
@@ -952,9 +977,37 @@ elif st.session_state.current_page == "MONTHLY":
             chosen_m = st.selectbox("Select Month (Latest on top):", ["All Months"] + list(months))
             target_m = sells_df if chosen_m == "All Months" else sells_df[sells_df["Month_Display"] == chosen_m]
 
+            # Monthly KPI Card
+            m_gross = target_m["gross_pnl"].sum()
+            m_tax = target_m["cgt_tax"].sum()
+            m_net = target_m["net_pnl"].sum()
+
+            mk1, mk2, mk3 = st.columns(3)
+            mk1.metric("Gross P&L", f"{CURRENCY} {m_gross:,.2f}")
+            mk2.metric("CGT Deducted", f"{CURRENCY} {m_tax:,.2f}")
+            mk3.metric("Net Realized Gain/Loss", f"{CURRENCY} {m_net:,.2f}")
+
+            st.write("---")
+
+            # Structured Header Row
+            mh1, mh2, mh3, mh4, mh5, mh6 = st.columns([1.2, 1.8, 1, 1.5, 1.5, 1.2])
+            mh1.markdown("**Symbol**")
+            mh2.markdown("**Stock Name**")
+            mh3.markdown("**Shares**")
+            mh4.markdown("**Buy (Date @ Price)**")
+            mh5.markdown("**Sell (Date @ Price)**")
+            mh6.markdown("**Net Result**")
+
+            # Data Rows Below
             for _, row in target_m.sort_values(by="sale_date", ascending=False).iterrows():
-                icon = "💰 Profit" if row["net_pnl"] >= 0 else "🔻 Loss"
-                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {icon} {CURRENCY} {row['net_pnl']:,.2f}")
+                icon = "🟢" if row["net_pnl"] >= 0 else "🔴"
+                mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([1.2, 1.8, 1, 1.5, 1.5, 1.2])
+                mc1.write(f"{row['symbol']}")
+                mc2.write(f"{row['stock_name']}")
+                mc3.write(f"{row['shares_sold']:,.2f}")
+                mc4.write(f"{row['buy_date']} @ {row['buy_price']:,.2f}")
+                mc5.write(f"{row['sale_date']} @ {row['sale_price']:,.2f}")
+                mc6.write(f"{icon} {row['net_pnl']:,.2f}")
 
 # ANNUAL PERFORMANCE
 elif st.session_state.current_page == "ANNUAL":
@@ -980,10 +1033,27 @@ elif st.session_state.current_page == "ANNUAL":
             c2.metric("Total CGT Deducted", f"{CURRENCY} {yr_df['cgt_tax'].sum():,.2f}")
             c3.metric("Net Realized Gain/Loss", f"{CURRENCY} {yr_df['net_pnl'].sum():,.2f}")
 
-            st.write("#### Closed Lots")
+            st.write("---")
+
+            # Structured Header Row
+            yh1, yh2, yh3, yh4, yh5, yh6 = st.columns([1.2, 1.8, 1, 1.5, 1.5, 1.2])
+            yh1.markdown("**Symbol**")
+            yh2.markdown("**Stock Name**")
+            yh3.markdown("**Shares**")
+            yh4.markdown("**Buy (Date @ Price)**")
+            yh5.markdown("**Sell (Date @ Price)**")
+            yh6.markdown("**Net Result**")
+
+            # Data Rows Below
             for _, row in yr_df.sort_values(by="sale_date", ascending=False).iterrows():
-                badge = "⭐ Profit" if row["net_pnl"] >= 0 else "❌ Loss"
-                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {badge} {CURRENCY} {row['net_pnl']:,.2f}")
+                badge = "🟢" if row["net_pnl"] >= 0 else "🔴"
+                yc1, yc2, yc3, yc4, yc5, yc6 = st.columns([1.2, 1.8, 1, 1.5, 1.5, 1.2])
+                yc1.write(f"{row['symbol']}")
+                yc2.write(f"{row['stock_name']}")
+                yc3.write(f"{row['shares_sold']:,.2f}")
+                yc4.write(f"{row['buy_date']} @ {row['buy_price']:,.2f}")
+                yc5.write(f"{row['sale_date']} @ {row['sale_price']:,.2f}")
+                yc6.write(f"{badge} {row['net_pnl']:,.2f}")
 
 # CAPITAL GAIN TAX
 elif st.session_state.current_page == "CGT":
