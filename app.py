@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date, time
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Stock Trading Tracker", page_icon="📈", layout="centered")
+st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
 # 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
@@ -40,7 +40,6 @@ st.markdown("""
         padding-bottom: 2rem !important;
     }
 
-    /* Persistent Sticky Top Header */
     .sticky-header-container {
         position: -webkit-sticky;
         position: sticky;
@@ -61,7 +60,6 @@ st.markdown("""
         padding: 0px 4px !important;
     }
 
-    /* Menu container holding half-screen action buttons */
     .menu-button-box div[data-testid="stButton"] button {
         height: 52px !important;
         font-size: 16px !important;
@@ -79,7 +77,6 @@ st.markdown("""
         border-radius: 6px !important;
     }
 
-    /* Market Selector Buttons */
     div[data-testid="stButton"] button:has-text("Pakistani Stocks") {
         background-color: #10b981 !important;
         color: white !important;
@@ -97,19 +94,16 @@ st.markdown("""
         font-weight: bold !important;
     }
 
-    /* Green Purchase Button */
     div[data-testid="stButton"] button:has-text("➕ Purchase Record") {
         background-color: #10b981 !important;
         color: white !important;
         border: none !important;
     }
-    /* Red Sell Button */
     div[data-testid="stButton"] button:has-text("➖ Sell Record") {
         background-color: #ef4444 !important;
         color: white !important;
         border: none !important;
     }
-    /* Blue Analytics and Cash Buttons */
     div[data-testid="stButton"] button:has-text("📅 Weekly Summary"),
     div[data-testid="stButton"] button:has-text("🗓️ Monthly Summary"),
     div[data-testid="stButton"] button:has-text("🏆 Annual Performance"),
@@ -121,7 +115,6 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Dual Metric Banner */
     .metric-banner {
         display: flex;
         justify-content: space-between;
@@ -177,7 +170,7 @@ except Exception as e:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 4. NAVIGATION STATE MANAGEMENT
+# 4. NAVIGATION STATE & RECOVERY DETECTOR
 # ------------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -193,6 +186,12 @@ if "auth_view" not in st.session_state:
     st.session_state.auth_view = "LOGIN"
 if "active_editing_id" not in st.session_state:
     st.session_state.active_editing_id = None
+
+# Check if opened from email recovery link
+query_params = st.query_params
+if "code" in query_params or query_params.get("type") == "recovery":
+    st.session_state.auth_view = "RESET_PASSWORD"
+    recovery_code = query_params.get("code", "")
 
 def navigate_to(page, market=None):
     st.session_state.nav_stack.append((st.session_state.market, st.session_state.current_page))
@@ -214,11 +213,45 @@ def go_back():
     st.rerun()
 
 # ------------------------------------------------------------------------------
-# 5. AUTHENTICATION (Login & Forgot Password)
+# 5. AUTHENTICATION (Login, Forgot Password & Email Recovery Interceptor)
 # ------------------------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal Login</h2>", unsafe_allow_html=True)
-    if st.session_state.auth_view == "LOGIN":
+    st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal</h2>", unsafe_allow_html=True)
+    
+    # CASE A: User clicked the recovery link in their email
+    if st.session_state.auth_view == "RESET_PASSWORD":
+        st.subheader("🔑 Set New Password")
+        st.write("Enter your new password below:")
+        with st.form("reset_pwd_form"):
+            new_p1 = st.text_input("New Password", type="password", value="")
+            new_p2 = st.text_input("Confirm New Password", type="password", value="")
+            set_btn = st.form_submit_button("Save New Password", use_container_width=True)
+
+            if set_btn:
+                if not new_p1 or len(new_p1) < 6:
+                    st.error("Password must be at least 6 characters long.")
+                elif new_p1 != new_p2:
+                    st.error("Passwords do not match.")
+                else:
+                    try:
+                        # Verify the token and set the new password
+                        if "code" in query_params:
+                            supabase.auth.verify_otp({"token_hash": query_params["code"], "type": "recovery"})
+                        supabase.auth.update_user({"password": new_p1})
+                        st.success("✅ Password updated successfully! Please log in with your new password.")
+                        st.query_params.clear()
+                        st.session_state.auth_view = "LOGIN"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to reset password: {str(e)}")
+
+        if st.button("Back to Login", use_container_width=True):
+            st.query_params.clear()
+            st.session_state.auth_view = "LOGIN"
+            st.rerun()
+
+    # CASE B: Standard Login Screen
+    elif st.session_state.auth_view == "LOGIN":
         st.markdown('<div class="login-form-box">', unsafe_allow_html=True)
         with st.form("login_form"):
             email_in = st.text_input("Email", value="")
@@ -244,6 +277,7 @@ if not st.session_state.authenticated:
                 st.session_state.auth_view = "FORGOT"
                 st.rerun()
 
+    # CASE C: Forgot Password Request
     elif st.session_state.auth_view == "FORGOT":
         st.write("Enter your email to receive recovery instructions.")
         with st.form("forgot_form"):
@@ -252,7 +286,7 @@ if not st.session_state.authenticated:
             if reset_submit:
                 try:
                     supabase.auth.reset_password_for_email(reset_email)
-                    st.success("Recovery email sent!")
+                    st.success("Recovery email sent! Please check your inbox.")
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
@@ -321,7 +355,7 @@ else:
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
-# 7. CHANGE PASSWORD VIEW
+# 7. CHANGE PASSWORD VIEW (WHEN LOGGED IN)
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "CHANGE_PW":
     st.header("🔑 Change Password")
@@ -395,7 +429,6 @@ def load_cash():
     except Exception:
         return pd.DataFrame()
 
-# Helper: Compute Free Cash & Total Portfolio Equity
 def calculate_financials():
     cash_df = load_cash()
     buys_df = load_buys()
@@ -540,7 +573,6 @@ if st.session_state.current_page == "PURCHASE":
         if sym and sym.strip().upper() in existing_symbols:
             st.info(f"ℹ️ {sym.strip().upper()} exists in your holdings. This entry adds to your total shares.")
 
-        # Correct blank inputs: value=None with placeholder for numbers
         shares = st.number_input("Number of Shares", min_value=0.0, value=None, step=1.0, format="%.4f", placeholder="Enter number of shares")
         price = st.number_input(f"Purchase Price per Share ({CURRENCY})", min_value=0.0, value=None, step=0.5, format="%.2f", placeholder="Enter purchase price")
         fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, value=None, step=1.0, format="%.2f", placeholder="Enter fees (if any)")
@@ -846,7 +878,6 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         
         c_country = "Pakistan"
         if MARKET == "INTL":
-            # Fix: Use value="" instead of value=None to avoid AttributeError[cite: 7, 10]
             c_country = st.text_input("Origin/Destination Country", value="", placeholder="e.g., United States")
 
         amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, value=None, step=100.0, format="%.2f", placeholder="Enter amount")
