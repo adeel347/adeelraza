@@ -151,26 +151,6 @@ st.markdown("""
         margin-top: 4px;
     }
 
-    /* Clean Table Row Styling */
-    .table-header {
-        background-color: #1e293b;
-        color: #94a3b8;
-        font-weight: 700;
-        font-size: 13px;
-        padding: 10px 8px;
-        border-radius: 6px;
-        margin-bottom: 8px;
-    }
-    .table-row {
-        background-color: #0f172a;
-        border-bottom: 1px solid #1e293b;
-        color: #f8fafc;
-        font-size: 14px;
-        padding: 8px 8px;
-        display: flex;
-        align-items: center;
-    }
-
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -498,7 +478,6 @@ if st.session_state.current_page == "MARKET_MENU":
                 st.warning("⚠️ Ticker not available")
         
         if not open_lots.empty:
-            # AGGREGATION: Combine multiple lots of the same stock into one consolidated holding row
             open_lots["lot_value"] = open_lots["shares_remaining"] * open_lots["price_per_share"]
             
             agg_dict = {
@@ -533,7 +512,7 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. ENTRY SUBPAGES WITH CLEAN TABULAR DISPLAY & NO DEFAULT VALUES
+# 10. ENTRY SUBPAGES
 # ------------------------------------------------------------------------------
 
 # PURCHASE ENTRY
@@ -555,7 +534,6 @@ if st.session_state.current_page == "PURCHASE":
         if sym and sym in existing_symbols:
             st.info(f"ℹ️ {sym} exists in your holdings. This entry adds to your total shares.")
 
-        # Zero defaults
         shares = st.number_input("Number of Shares", min_value=0.0, value=0.0, step=1.0, format="%.4f")
         price = st.number_input(f"Purchase Price per Share ({CURRENCY})", min_value=0.0, value=0.0, step=0.5, format="%.2f")
         fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, value=0.0, step=1.0, format="%.2f")
@@ -629,7 +607,6 @@ if st.session_state.current_page == "PURCHASE":
                         st.success(f"Deleted Purchase Entry #{item_id}")
                         st.rerun()
 
-            # Inline Edit Form
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_buy_{item_id}"):
                     st.write(f"Editing Purchase ID #{item_id}")
@@ -660,7 +637,7 @@ if st.session_state.current_page == "PURCHASE":
     else:
         st.info("No purchases recorded yet.")
 
-# SELL ENTRY
+# SELL ENTRY (Searchable Dropdown with clean, unique symbols only)
 elif st.session_state.current_page == "SELL":
     st.header("➖ Sell Record Entry")
     buys_df = load_buys()
@@ -668,27 +645,30 @@ elif st.session_state.current_page == "SELL":
         st.warning("No purchase inventory available.")
     else:
         open_lots = buys_df[buys_df["shares_remaining"] > 0].copy()
-        s_sym = st.text_input("🔍 Search Open Lots by Symbol Prefix:", "").strip().upper()
-        if s_sym:
-            open_lots = open_lots[open_lots["symbol"].str.startswith(s_sym, na=False)]
-            if open_lots.empty:
-                st.warning("⚠️ Ticker not available")
+        
+        # Extract unique symbols only
+        unique_symbols = sorted(open_lots["symbol"].unique().tolist()) if not open_lots.empty else []
 
-        if not open_lots.empty:
-            lot_options = {
-                f"Lot #{r['id']} | {r['symbol']} ({r['stock_name']}) | Avail: {r['shares_remaining']} sh | Bought: {r['purchase_date']} @ {r['price_per_share']}": r
-                for _, r in open_lots.iterrows()
-            }
-            chosen_label = st.selectbox("Select Purchased Lot to Sell From:", list(lot_options.keys()))
-            lot = lot_options[chosen_label]
+        if unique_symbols:
+            # Searchable selectbox displaying only the stock symbol
+            selected_symbol = st.selectbox(
+                "Select Stock Symbol to Sell:",
+                options=unique_symbols,
+                help="Type to search your available stock symbols"
+            )
+
+            # Retrieve open lots for the selected symbol (FIFO order)
+            symbol_lots = open_lots[open_lots["symbol"] == selected_symbol].sort_values(by="purchase_date").copy()
+            total_avail_shares = float(symbol_lots["shares_remaining"].sum())
+            first_lot = symbol_lots.iloc[0]
 
             with st.form("sell_form"):
                 st.warning("⚠️ Changes are NOT saved until you click 'Save Sell Changes' below.")
+                st.info(f"Selected: **{selected_symbol}** ({first_lot['stock_name']}) | Total Available: **{total_avail_shares:,.2f}** shares")
                 s_date = st.date_input("Sale Date", value=date.today())
-                avail = float(lot["shares_remaining"])
 
                 # Zero defaults
-                shares_to_sell = st.number_input(f"Shares to Sell (Available: {avail})", min_value=0.0, max_value=avail, value=0.0, step=1.0, format="%.4f")
+                shares_to_sell = st.number_input(f"Shares to Sell (Max: {total_avail_shares:,.2f})", min_value=0.0, max_value=total_avail_shares, value=0.0, step=1.0, format="%.4f")
                 sell_price = st.number_input(f"Selling Price per Share ({CURRENCY})", min_value=0.0, value=0.0, step=0.5, format="%.2f")
                 sell_fees = st.number_input(f"Selling Fees ({CURRENCY})", min_value=0.0, value=0.0, step=1.0, format="%.2f")
                 cgt_rate = st.number_input("Capital Gain Tax %", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
@@ -697,42 +677,58 @@ elif st.session_state.current_page == "SELL":
                 if save_s:
                     if shares_to_sell <= 0 or sell_price <= 0:
                         st.error("Please enter a valid number of shares and selling price.")
-                    elif shares_to_sell > avail:
+                    elif shares_to_sell > total_avail_shares:
                         st.error("❌ Sale quantity exceeds available shares!")
                     else:
-                        unit_cost = float(lot["total_cost"]) / float(lot["shares_bought"])
-                        cost_sold = shares_to_sell * unit_cost
-                        gross_rev = shares_to_sell * sell_price
-                        gross_pnl = gross_rev - cost_sold - sell_fees
-                        tax = (gross_pnl * (cgt_rate / 100.0)) if gross_pnl > 0 else 0.0
-                        net_pnl = gross_pnl - tax
+                        # FIFO Lot Execution
+                        remaining_to_sell = shares_to_sell
+                        total_gross_pnl = 0.0
+                        total_tax = 0.0
+                        total_net_pnl = 0.0
 
-                        sell_payload = {
-                            "buy_order_id": int(lot["id"]),
-                            "market": str(MARKET),
-                            "country": str(lot.get("country", "Pakistan")),
-                            "sale_date": s_date.strftime("%Y-%m-%d"),
-                            "symbol": str(lot["symbol"]),
-                            "stock_name": str(lot["stock_name"]),
-                            "shares_sold": float(shares_to_sell),
-                            "buy_price": float(lot["price_per_share"]),
-                            "buy_date": str(lot["purchase_date"]),
-                            "sale_price": float(sell_price),
-                            "selling_fees": float(sell_fees),
-                            "gross_pnl": round(float(gross_pnl), 2),
-                            "cgt_rate": float(cgt_rate),
-                            "cgt_tax": round(float(tax), 2),
-                            "net_pnl": round(float(net_pnl), 2)
-                        }
-                        try:
+                        for _, lot_row in symbol_lots.iterrows():
+                            if remaining_to_sell <= 0:
+                                break
+                            
+                            lot_avail = float(lot_row["shares_remaining"])
+                            shares_from_lot = min(remaining_to_sell, lot_avail)
+                            unit_cost = float(lot_row["total_cost"]) / float(lot_row["shares_bought"])
+                            cost_basis = shares_from_lot * unit_cost
+                            gross_rev = shares_from_lot * sell_price
+                            
+                            # Allocate fees proportionally
+                            allocated_fee = (shares_from_lot / shares_to_sell) * sell_fees
+                            lot_gross_pnl = gross_rev - cost_basis - allocated_fee
+                            lot_tax = (lot_gross_pnl * (cgt_rate / 100.0)) if lot_gross_pnl > 0 else 0.0
+                            lot_net_pnl = lot_gross_pnl - lot_tax
+
+                            sell_payload = {
+                                "buy_order_id": int(lot_row["id"]),
+                                "market": str(MARKET),
+                                "country": str(lot_row.get("country", "Pakistan")),
+                                "sale_date": s_date.strftime("%Y-%m-%d"),
+                                "symbol": str(selected_symbol),
+                                "stock_name": str(lot_row["stock_name"]),
+                                "shares_sold": float(shares_from_lot),
+                                "buy_price": float(lot_row["price_per_share"]),
+                                "buy_date": str(lot_row["purchase_date"]),
+                                "sale_price": float(sell_price),
+                                "selling_fees": round(float(allocated_fee), 2),
+                                "gross_pnl": round(float(lot_gross_pnl), 2),
+                                "cgt_rate": float(cgt_rate),
+                                "cgt_tax": round(float(lot_tax), 2),
+                                "net_pnl": round(float(lot_net_pnl), 2)
+                            }
                             supabase.table("sell_orders").insert(sell_payload).execute()
-                            supabase.table("buy_orders").update({"shares_remaining": avail - shares_to_sell}).eq("id", lot["id"]).execute()
-                            st.success(f"✅ Sale logged! Net P&L: {CURRENCY} {net_pnl:,.2f}")
-                            st.rerun()
-                        except Exception as err:
-                            st.error(f"Error executing sale: {err}")
+                            supabase.table("buy_orders").update({"shares_remaining": lot_avail - shares_from_lot}).eq("id", lot_row["id"]).execute()
+
+                            remaining_to_sell -= shares_from_lot
+                            total_net_pnl += lot_net_pnl
+
+                        st.success(f"✅ Sale logged for {shares_to_sell} shares of {selected_symbol}! Total Net P&L: {CURRENCY} {total_net_pnl:,.2f}")
+                        st.rerun()
         else:
-            st.info("No available shares found.")
+            st.info("No open stock positions currently available to sell.")
 
     st.write("---")
     st.subheader("📜 Recorded Sales")
@@ -823,7 +819,6 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         if MARKET == "INTL":
             c_country = st.text_input("Origin/Destination Country", value="").strip()
 
-        # Zero defaults
         amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, value=0.0, step=100.0, format="%.2f")
         memo = st.text_input("Notes (Bank reference, wallet ID, etc.)", value="")
 
