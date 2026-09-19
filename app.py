@@ -36,7 +36,6 @@ components.html("""
 # ------------------------------------------------------------------------------
 st.markdown("""
 <style>
-    /* Reduce top padding */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 2rem !important;
@@ -72,7 +71,6 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Sign In form button standard sizing */
     .login-form-box div[data-testid="stFormSubmitButton"] button {
         width: 160px !important;
         height: 42px !important;
@@ -82,7 +80,7 @@ st.markdown("""
         border-radius: 6px !important;
     }
 
-    /* Market Selector Buttons: Green for Pakistani, Blue for International */
+    /* Market Selector Buttons */
     div[data-testid="stButton"] button:has-text("Pakistani Stocks") {
         background-color: #10b981 !important;
         color: white !important;
@@ -118,41 +116,37 @@ st.markdown("""
     div[data-testid="stButton"] button:has-text("🏆 Annual Performance"),
     div[data-testid="stButton"] button:has-text("📊 Capital Gain Tax"),
     div[data-testid="stButton"] button:has-text("📥 Deposit"),
-    div[data-testid="stButton"] button:has-text("📤 Withdrawal"),
-    div[data-testid="stButton"] button:has-text("📝 Edit Purchases"),
-    div[data-testid="stButton"] button:has-text("📝 Edit Sells"),
-    div[data-testid="stButton"] button:has-text("📝 Edit Deposits"),
-    div[data-testid="stButton"] button:has-text("📝 Edit Withdrawals") {
+    div[data-testid="stButton"] button:has-text("📤 Withdrawal") {
         background-color: #2563eb !important;
         color: white !important;
         border: none !important;
     }
-    /* Grey Edit Button */
-    div[data-testid="stButton"] button:has-text("✏️ Edit") {
-        background-color: #64748b !important;
-        color: white !important;
-        border: none !important;
-    }
 
-    /* Equity KPI Highlight Banner */
-    .equity-card {
+    /* Dual Metric Banner (Equity & Free Cash) */
+    .metric-banner {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+    .metric-card-box {
+        flex: 1;
         background: linear-gradient(135deg, #1e293b, #0f172a);
         border: 1px solid #3b82f6;
         border-radius: 10px;
-        padding: 16px;
+        padding: 14px;
         text-align: center;
-        margin-bottom: 16px;
     }
-    .equity-title {
+    .metric-title-txt {
         color: #94a3b8;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
-    .equity-val {
+    .metric-val-txt {
         color: #f8fafc;
-        font-size: 28px;
+        font-size: 24px;
         font-weight: 800;
         margin-top: 4px;
     }
@@ -162,12 +156,15 @@ st.markdown("""
         border: 1px solid #334155;
         border-radius: 8px;
         padding: 12px;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
     }
 
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
+        }
+        .metric-banner {
+            flex-direction: column;
         }
     }
 </style>
@@ -185,7 +182,7 @@ def get_supabase() -> Client:
 try:
     supabase = get_supabase()
 except Exception as e:
-    st.error(f"Database error: {e}")
+    st.error(f"Database connection error: {e}")
     st.stop()
 
 # ------------------------------------------------------------------------------
@@ -364,7 +361,7 @@ if st.session_state.current_page == "CHANGE_PW":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 8. HOME: MARKET SELECTION (Direct Green/Blue Buttons, No Emojis, No Extra Text)
+# 8. HOME: MARKET SELECTION SCREEN
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "HOME" or st.session_state.market is None:
     st.markdown("<h2 style='text-align:center; margin-bottom: 25px;'>Choose Your Portfolio</h2>", unsafe_allow_html=True)
@@ -407,31 +404,50 @@ def load_cash():
     except Exception:
         return pd.DataFrame()
 
-# Helper: Compute Market Equity
-def calculate_equity():
+# Helper: Compute Free Cash & Total Portfolio Equity
+def calculate_financials():
     cash_df = load_cash()
+    buys_df = load_buys()
     sells_df = load_sells()
 
     total_dep = cash_df[cash_df["flow_type"] == "DEPOSIT"]["amount"].sum() if not cash_df.empty else 0.0
     total_wth = cash_df[cash_df["flow_type"] == "WITHDRAWAL"]["amount"].sum() if not cash_df.empty else 0.0
-    net_realized_pnl = sells_df["net_pnl"].sum() if not sells_df.empty else 0.0
 
-    return (total_dep - total_wth) + net_realized_pnl
+    total_buy_spend = buys_df["total_cost"].sum() if not buys_df.empty else 0.0
+    total_sell_revenue = ((sells_df["shares_sold"] * sells_df["sale_price"]) - sells_df["selling_fees"] - sells_df["cgt_tax"]).sum() if not sells_df.empty else 0.0
+
+    # Free Cash: Available liquid balance
+    free_cash = (total_dep - total_wth) - total_buy_spend + total_sell_revenue
+
+    # Current value of open shares
+    open_holdings_val = (buys_df["shares_remaining"] * buys_df["price_per_share"]).sum() if not buys_df.empty else 0.0
+
+    # Total Equity: Liquid cash + Value of holdings
+    total_equity = free_cash + open_holdings_val
+
+    return free_cash, total_equity
 
 # ------------------------------------------------------------------------------
 # 9. DEDICATED MARKET OPTIONS MENU PAGE
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "MARKET_MENU":
-    # 1. Total Equity Card above buttons
-    market_equity = calculate_equity()
+    free_cash, total_equity = calculate_financials()
+
+    # Dual Card Banner: Total Equity & Free Cash
     st.markdown(f"""
-    <div class="equity-card">
-        <div class="equity-title">Total Portfolio Equity ({'Pakistani Stocks' if MARKET == 'PK' else 'International Stocks'})</div>
-        <div class="equity-val">{CURRENCY} {market_equity:,.2f}</div>
+    <div class="metric-banner">
+        <div class="metric-card-box">
+            <div class="metric-title-txt">Total Equity</div>
+            <div class="metric-val-txt">{CURRENCY} {total_equity:,.2f}</div>
+        </div>
+        <div class="metric-card-box">
+            <div class="metric-title-txt">Free Cash (Liquid)</div>
+            <div class="metric-val-txt" style="color: #10b981;">{CURRENCY} {free_cash:,.2f}</div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # 2. Centered Half-Width Buttons [1, 2, 1]
+    # Centered Half-Width Buttons [1, 2, 1]
     _, btn_center_col, _ = st.columns([1, 2, 1])
     with btn_center_col:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
@@ -462,9 +478,6 @@ if st.session_state.current_page == "MARKET_MENU":
         if st.button("📊 Capital Gain Tax", use_container_width=True):
             navigate_to("CGT")
 
-        if st.button("✏️ Edit", use_container_width=True):
-            navigate_to("EDIT_MENU")
-
         st.markdown('</div></div>', unsafe_allow_html=True)
 
     st.write("---")
@@ -474,7 +487,7 @@ if st.session_state.current_page == "MARKET_MENU":
     if not buys_df.empty:
         open_lots = buys_df[buys_df["shares_remaining"] > 0].copy()
         if search_sym:
-            open_lots = open_lots[open_lots["symbol"].str.contains(search_sym, na=False)]
+            open_lots = open_lots[open_lots["symbol"].str.startswith(search_sym, na=False)]
             if open_lots.empty:
                 st.warning("⚠️ Ticker not available")
         if not open_lots.empty:
@@ -489,32 +502,7 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. DEDICATED EDIT OPTIONS MENU PAGE
-# ------------------------------------------------------------------------------
-if st.session_state.current_page == "EDIT_MENU":
-    st.markdown("<h2 style='text-align:center;'>✏️ Choose Record Type to Edit</h2>", unsafe_allow_html=True)
-
-    _, edit_btn_col, _ = st.columns([1, 2, 1])
-    with edit_btn_col:
-        st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
-
-        if st.button("📝 Edit Purchases", use_container_width=True):
-            navigate_to("EDIT_PURCHASES")
-
-        if st.button("📝 Edit Sells", use_container_width=True):
-            navigate_to("EDIT_SELLS")
-
-        if st.button("📝 Edit Deposits", use_container_width=True):
-            navigate_to("EDIT_DEPOSITS")
-
-        if st.button("📝 Edit Withdrawals", use_container_width=True):
-            navigate_to("EDIT_WITHDRAWALS")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.stop()
-
-# ------------------------------------------------------------------------------
-# 11. ENTRY SUBPAGES
+# 10. ENTRY SUBPAGES WITH INLINE HISTORY & REAL-TIME SEARCH
 # ------------------------------------------------------------------------------
 
 # PURCHASE ENTRY
@@ -563,8 +551,73 @@ if st.session_state.current_page == "PURCHASE":
                 try:
                     supabase.table("buy_orders").insert(payload).execute()
                     st.success(f"✅ Purchase of {shares} shares of {sym} recorded!")
+                    st.rerun()
                 except Exception as err:
                     st.error(f"Error saving purchase: {err}")
+
+    st.write("---")
+    st.subheader("📜 Recorded Purchases")
+    
+    # Real-time search by stock symbol prefix
+    search_p = st.text_input("🔍 Search Purchase by Symbol (e.g., B, BA, AAPL):", key="search_p_sym").strip().upper()
+    
+    buys_all = load_buys()
+    if not buys_all.empty:
+        display_buys = buys_all.copy()
+        if search_p:
+            display_buys = display_buys[display_buys["symbol"].str.startswith(search_p, na=False)]
+            if display_buys.empty:
+                st.warning("⚠️ No matching stock symbol found")
+
+        for _, item in display_buys.sort_values(by="purchase_date", ascending=False).iterrows():
+            item_id = item["id"]
+            c_info, c_action = st.columns([4, 1.2])
+            with c_info:
+                st.markdown(f"""
+                <div class="entry-card">
+                    <b>ID #{item_id} | {item['symbol']} ({item['stock_name']})</b><br>
+                    Bought: {item['shares_bought']} sh @ {item['price_per_share']} {CURRENCY} on {item['purchase_date']} | Rem: {item['shares_remaining']} sh | Total: {item['total_cost']} {CURRENCY}
+                </div>
+                """, unsafe_allow_html=True)
+            with c_action:
+                with st.popover("⋮ Actions"):
+                    if st.button("✏️ Edit", key=f"btn_edit_buy_{item_id}", use_container_width=True):
+                        st.session_state.active_editing_id = item_id
+                    if st.button("🗑️ Delete", key=f"btn_del_buy_{item_id}", use_container_width=True):
+                        # Independent deletion of order record without altering portfolio holding quantities
+                        supabase.table("buy_orders").delete().eq("id", item_id).execute()
+                        st.success(f"Deleted Purchase Entry #{item_id}")
+                        st.rerun()
+
+            if st.session_state.active_editing_id == item_id:
+                with st.form(f"edit_form_buy_{item_id}"):
+                    st.write(f"Editing Purchase ID #{item_id}")
+                    sym_val = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
+                    name_val = st.text_input("Stock Name", value=item["stock_name"]).strip()
+                    date_val = st.date_input("Purchase Date", value=pd.to_datetime(item["purchase_date"]).date())
+                    sh_val = st.number_input("Shares Bought", value=float(item["shares_bought"]))
+                    pr_val = st.number_input("Price per Share", value=float(item["price_per_share"]))
+                    fe_val = st.number_input("Fees", value=float(item["fees"]))
+                    tx_val = st.number_input("Taxes", value=float(item["taxes"]))
+
+                    if st.form_submit_button("Save Changes", use_container_width=True):
+                        new_tot = (sh_val * pr_val) + fe_val + tx_val
+                        payload = {
+                            "symbol": sym_val,
+                            "stock_name": name_val,
+                            "purchase_date": date_val.strftime("%Y-%m-%d"),
+                            "shares_bought": float(sh_val),
+                            "price_per_share": float(pr_val),
+                            "fees": float(fe_val),
+                            "taxes": float(tx_val),
+                            "total_cost": round(float(new_tot), 2)
+                        }
+                        supabase.table("buy_orders").update(payload).eq("id", item_id).execute()
+                        st.session_state.active_editing_id = None
+                        st.success("✅ Purchase updated!")
+                        st.rerun()
+    else:
+        st.info("No purchases recorded yet.")
 
 # SELL ENTRY
 elif st.session_state.current_page == "SELL":
@@ -574,9 +627,9 @@ elif st.session_state.current_page == "SELL":
         st.warning("No purchase inventory available.")
     else:
         open_lots = buys_df[buys_df["shares_remaining"] > 0].copy()
-        s_sym = st.text_input("🔍 Search Stock Symbol:", "").strip().upper()
+        s_sym = st.text_input("🔍 Search Open Lots by Symbol Prefix:", "").strip().upper()
         if s_sym:
-            open_lots = open_lots[open_lots["symbol"].str.contains(s_sym, na=False)]
+            open_lots = open_lots[open_lots["symbol"].str.startswith(s_sym, na=False)]
             if open_lots.empty:
                 st.warning("⚠️ Ticker not available")
 
@@ -630,233 +683,27 @@ elif st.session_state.current_page == "SELL":
                             supabase.table("sell_orders").insert(sell_payload).execute()
                             supabase.table("buy_orders").update({"shares_remaining": avail - shares_to_sell}).eq("id", lot["id"]).execute()
                             st.success(f"✅ Sale logged! Net P&L: {CURRENCY} {net_pnl:,.2f}")
+                            st.rerun()
                         except Exception as err:
                             st.error(f"Error executing sale: {err}")
         else:
             st.info("No available shares found.")
 
-# DEPOSIT & WITHDRAWAL ENTRY
-elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
-    flow_kind = st.session_state.current_page
-    st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
+    st.write("---")
+    st.subheader("📜 Recorded Sales")
+    
+    # Real-time search for sell logs
+    search_s = st.text_input("🔍 Search Sold Records by Symbol Prefix (e.g., B, BA, AAPL):", key="search_s_sym").strip().upper()
+    
+    sells_all = load_sells()
+    if not sells_all.empty:
+        display_sells = sells_all.copy()
+        if search_s:
+            display_sells = display_sells[display_sells["symbol"].str.startswith(search_s, na=False)]
+            if display_sells.empty:
+                st.warning("⚠️ No matching stock symbol found")
 
-    with st.form("cash_flow_form"):
-        st.warning("⚠️ Changes are NOT saved until you click 'Save Transaction' below.")
-        e_date = st.date_input("Transaction Date", value=date.today())
-        e_time = st.time_input("Transaction Time", value=time(12, 0))
-        c_country = "Pakistan"
-        if MARKET == "INTL":
-            c_country = st.text_input("Origin/Destination Country", value="United States")
-        amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.01, step=100.0, format="%.2f")
-        memo = st.text_input("Notes (Bank reference, wallet ID, etc.)")
-
-        save_c = st.form_submit_button("Save Transaction", use_container_width=True)
-        if save_c:
-            payload = {
-                "market": str(MARKET),
-                "country": str(c_country),
-                "entry_date": e_date.strftime("%Y-%m-%d"),
-                "entry_time": e_time.strftime("%H:%M:%S"),
-                "flow_type": str(flow_kind),
-                "amount": float(amt),
-                "notes": str(memo) if memo else None
-            }
-            try:
-                supabase.table("cash_flows").insert(payload).execute()
-                st.success(f"✅ {flow_kind} of {CURRENCY} {amt:,.2f} recorded successfully!")
-            except Exception as err:
-                st.error(f"Failed to record transaction: {err}")
-
-    st.write("#### Recent Logs")
-    cf_df = load_cash()
-    if not cf_df.empty:
-        filtered_cf = cf_df[cf_df["flow_type"] == flow_kind]
-        if not filtered_cf.empty:
-            st.dataframe(filtered_cf[["entry_date", "entry_time", "amount", "notes"]], use_container_width=True)
-
-# ------------------------------------------------------------------------------
-# 12. REPORTING PAGES
-# ------------------------------------------------------------------------------
-
-# WEEKLY SUMMARY
-elif st.session_state.current_page == "WEEKLY":
-    st.header("📅 Weekly Summary (Monday – Friday)")
-    sells_df = load_sells()
-    if sells_df.empty:
-        st.info("No closed sales records found.")
-    else:
-        w_sym = st.text_input("🔍 Search Stock Symbol", "").strip().upper()
-        if w_sym:
-            sells_df = sells_df[sells_df["symbol"].str.contains(w_sym, na=False)]
-            if sells_df.empty:
-                st.warning("⚠️ Ticker not available")
-
-        if not sells_df.empty:
-            sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
-            sells_df["Mon_Start"] = sells_df["sale_dt"].apply(lambda d: d - pd.Timedelta(days=d.weekday()))
-            sells_df["Fri_End"] = sells_df["Mon_Start"].apply(lambda d: d + pd.Timedelta(days=4))
-            sells_df["Week_Label"] = sells_df.apply(lambda r: f"Week: {r['Mon_Start'].strftime('%d %b %Y')} to {r['Fri_End'].strftime('%d %b %Y')}", axis=1)
-
-            weeks = sells_df.sort_values(by="Mon_Start", ascending=False)["Week_Label"].unique()
-            chosen_w = st.selectbox("Select Week Period (Latest first):", ["All Weeks"] + list(weeks))
-            target = sells_df if chosen_w == "All Weeks" else sells_df[sells_df["Week_Label"] == chosen_w]
-
-            for _, row in target.sort_values(by="sale_date", ascending=False).iterrows():
-                emoji = "🟢 Profit" if row["net_pnl"] >= 0 else "🔴 Loss"
-                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {emoji} {CURRENCY} {row['net_pnl']:,.2f}")
-
-# MONTHLY SUMMARY
-elif st.session_state.current_page == "MONTHLY":
-    st.header("🗓️ Monthly Summary (1st to Last Day)")
-    sells_df = load_sells()
-    if sells_df.empty:
-        st.info("No closed sales records found.")
-    else:
-        m_sym = st.text_input("🔍 Search Stock Symbol", "").strip().upper()
-        if m_sym:
-            sells_df = sells_df[sells_df["symbol"].str.contains(m_sym, na=False)]
-            if sells_df.empty:
-                st.warning("⚠️ Ticker not available")
-
-        if not sells_df.empty:
-            sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
-            sells_df["Month_Display"] = sells_df["sale_dt"].dt.strftime("%B %Y")
-            months = sells_df.sort_values(by="sale_dt", ascending=False)["Month_Display"].unique()
-            chosen_m = st.selectbox("Select Month (Latest on top):", ["All Months"] + list(months))
-            target_m = sells_df if chosen_m == "All Months" else sells_df[sells_df["Month_Display"] == chosen_m]
-
-            for _, row in target_m.sort_values(by="sale_date", ascending=False).iterrows():
-                icon = "💰 Profit" if row["net_pnl"] >= 0 else "🔻 Loss"
-                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {icon} {CURRENCY} {row['net_pnl']:,.2f}")
-
-# ANNUAL PERFORMANCE
-elif st.session_state.current_page == "ANNUAL":
-    st.header("🏆 Annual Performance (From Jan 1)")
-    sells_df = load_sells()
-    if sells_df.empty:
-        st.info("No sales records available.")
-    else:
-        y_sym = st.text_input("🔍 Search Stock Symbol", "").strip().upper()
-        if y_sym:
-            sells_df = sells_df[sells_df["symbol"].str.contains(y_sym, na=False)]
-            if sells_df.empty:
-                st.warning("⚠️ Ticker not available")
-
-        if not sells_df.empty:
-            sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
-            years = sorted(sells_df["sale_dt"].dt.year.unique(), reverse=True)
-            chosen_y = st.selectbox("Select Calendar Year:", years)
-            yr_df = sells_df[sells_df["sale_dt"].dt.year == chosen_y]
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric(f"Gross P&L (Jan 1 – Dec 31, {chosen_y})", f"{CURRENCY} {yr_df['gross_pnl'].sum():,.2f}")
-            c2.metric("Total CGT Deducted", f"{CURRENCY} {yr_df['cgt_tax'].sum():,.2f}")
-            c3.metric("Net Realized Gain/Loss", f"{CURRENCY} {yr_df['net_pnl'].sum():,.2f}")
-
-            st.write("#### Closed Lots")
-            for _, row in yr_df.sort_values(by="sale_date", ascending=False).iterrows():
-                badge = "⭐ Profit" if row["net_pnl"] >= 0 else "❌ Loss"
-                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {badge} {CURRENCY} {row['net_pnl']:,.2f}")
-
-# CAPITAL GAIN TAX
-elif st.session_state.current_page == "CGT":
-    st.header("📊 Capital Gains Tax Ledger")
-    sells_df = load_sells()
-    if sells_df.empty:
-        st.info("No tax records logged.")
-    else:
-        t_sym = st.text_input("🔍 Search Stock Symbol", "").strip().upper()
-        if t_sym:
-            sells_df = sells_df[sells_df["symbol"].str.contains(t_sym, na=False)]
-            if sells_df.empty:
-                st.warning("⚠️ Ticker not available")
-
-        if not sells_df.empty:
-            cols = ["symbol", "buy_price", "sale_price", "buy_date", "sale_date", "cgt_rate", "cgt_tax", "net_pnl"]
-            cgt_df = sells_df[cols].copy()
-            cgt_df.columns = ["Stock Symbol", "Buy Price", "Sell Price", "Buy Date", "Sell Date", "% Tax Deduction", "Capital Gain Tax", "Net P&L"]
-            st.dataframe(cgt_df, use_container_width=True)
-
-# ------------------------------------------------------------------------------
-# 13. EDIT & DELETE MANAGEMENT PAGES
-# ------------------------------------------------------------------------------
-
-# EDIT PURCHASES
-elif st.session_state.current_page == "EDIT_PURCHASES":
-    st.header("✏️ Edit Purchase Records")
-    buys = load_buys()
-    if buys.empty:
-        st.info("No purchase records found.")
-    else:
-        e_sym = st.text_input("🔍 Filter by Symbol:", "").strip().upper()
-        if e_sym:
-            buys = buys[buys["symbol"].str.contains(e_sym, na=False)]
-            if buys.empty:
-                st.warning("⚠️ Ticker not available")
-
-        for _, item in buys.iterrows():
-            item_id = item["id"]
-            c_info, c_action = st.columns([4, 1.2])
-            with c_info:
-                st.markdown(f"""
-                <div class="entry-card">
-                    <b>ID #{item_id} | {item['symbol']} ({item['stock_name']})</b><br>
-                    Bought: {item['shares_bought']} sh @ {item['price_per_share']} {CURRENCY} on {item['purchase_date']} | Rem: {item['shares_remaining']} sh
-                </div>
-                """, unsafe_allow_html=True)
-            with c_action:
-                with st.popover("⋮ Actions"):
-                    if st.button("✏️ Edit", key=f"btn_edit_buy_{item_id}", use_container_width=True):
-                        st.session_state.active_editing_id = item_id
-                    if st.button("🗑️ Delete", key=f"btn_del_buy_{item_id}", use_container_width=True):
-                        supabase.table("buy_orders").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted Lot #{item_id}")
-                        st.rerun()
-
-            if st.session_state.active_editing_id == item_id:
-                with st.form(f"edit_form_buy_{item_id}"):
-                    st.write(f"Editing Purchase ID #{item_id}")
-                    sym_val = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
-                    name_val = st.text_input("Stock Name", value=item["stock_name"]).strip()
-                    date_val = st.date_input("Purchase Date", value=pd.to_datetime(item["purchase_date"]).date())
-                    sh_val = st.number_input("Shares Bought", value=float(item["shares_bought"]))
-                    pr_val = st.number_input("Price per Share", value=float(item["price_per_share"]))
-                    fe_val = st.number_input("Fees", value=float(item["fees"]))
-                    tx_val = st.number_input("Taxes", value=float(item["taxes"]))
-                    rem_val = st.number_input("Shares Remaining", value=float(item["shares_remaining"]))
-
-                    if st.form_submit_button("Save Changes", use_container_width=True):
-                        new_tot = (sh_val * pr_val) + fe_val + tx_val
-                        payload = {
-                            "symbol": sym_val,
-                            "stock_name": name_val,
-                            "purchase_date": date_val.strftime("%Y-%m-%d"),
-                            "shares_bought": float(sh_val),
-                            "price_per_share": float(pr_val),
-                            "fees": float(fe_val),
-                            "taxes": float(tx_val),
-                            "total_cost": round(float(new_tot), 2),
-                            "shares_remaining": float(rem_val)
-                        }
-                        supabase.table("buy_orders").update(payload).eq("id", item_id).execute()
-                        st.session_state.active_editing_id = None
-                        st.success("✅ Purchase updated successfully!")
-                        st.rerun()
-
-# EDIT SELLS
-elif st.session_state.current_page == "EDIT_SELLS":
-    st.header("✏️ Edit Sell Records")
-    sells = load_sells()
-    if sells.empty:
-        st.info("No sell records found.")
-    else:
-        s_filter = st.text_input("🔍 Filter by Symbol:", "").strip().upper()
-        if s_filter:
-            sells = sells[sells["symbol"].str.contains(s_filter, na=False)]
-            if sells.empty:
-                st.warning("⚠️ Ticker not available")
-
-        for _, item in sells.iterrows():
+        for _, item in display_sells.sort_values(by="sale_date", ascending=False).iterrows():
             item_id = item["id"]
             c_info, c_action = st.columns([4, 1.2])
             with c_info:
@@ -872,7 +719,7 @@ elif st.session_state.current_page == "EDIT_SELLS":
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_sell_{item_id}", use_container_width=True):
                         supabase.table("sell_orders").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted Sell #{item_id}")
+                        st.success(f"Deleted Sell Record #{item_id}")
                         st.rerun()
 
             if st.session_state.active_editing_id == item_id:
@@ -908,37 +755,81 @@ elif st.session_state.current_page == "EDIT_SELLS":
                         st.session_state.active_editing_id = None
                         st.success("✅ Sell record updated!")
                         st.rerun()
-
-# EDIT DEPOSITS
-elif st.session_state.current_page == "EDIT_DEPOSITS":
-    st.header("✏️ Edit Deposits")
-    cfs = load_cash()
-    deposits = cfs[cfs["flow_type"] == "DEPOSIT"] if not cfs.empty else pd.DataFrame()
-
-    if deposits.empty:
-        st.info("No deposit records found.")
     else:
-        for _, item in deposits.iterrows():
+        st.info("No completed sales recorded yet.")
+
+# DEPOSIT & WITHDRAWAL ENTRY
+elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
+    flow_kind = st.session_state.current_page
+    st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
+
+    with st.form("cash_flow_form"):
+        st.warning("⚠️ Changes are NOT saved until you click 'Save Transaction' below.")
+        e_date = st.date_input("Transaction Date", value=date.today())
+        e_time = st.time_input("Transaction Time", value=time(12, 0))
+        c_country = "Pakistan"
+        if MARKET == "INTL":
+            c_country = st.text_input("Origin/Destination Country", value="United States")
+        amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.01, step=100.0, format="%.2f")
+        memo = st.text_input("Notes (Bank reference, wallet ID, etc.)")
+
+        save_c = st.form_submit_button("Save Transaction", use_container_width=True)
+        if save_c:
+            payload = {
+                "market": str(MARKET),
+                "country": str(c_country),
+                "entry_date": e_date.strftime("%Y-%m-%d"),
+                "entry_time": e_time.strftime("%H:%M:%S"),
+                "flow_type": str(flow_kind),
+                "amount": float(amt),
+                "notes": str(memo) if memo else None
+            }
+            try:
+                supabase.table("cash_flows").insert(payload).execute()
+                st.success(f"✅ {flow_kind} of {CURRENCY} {amt:,.2f} recorded successfully!")
+                st.rerun()
+            except Exception as err:
+                st.error(f"Failed to record transaction: {err}")
+
+    st.write("---")
+    st.subheader(f"📜 Recorded {flow_kind.capitalize()}s")
+
+    # Real-time search for cash flows by Amount or Date string
+    search_cf = st.text_input(f"🔍 Search {flow_kind.capitalize()} by Amount or Date (e.g., 15, 2026-09):", key="search_cf_txt").strip()
+
+    cf_df = load_cash()
+    if not cf_df.empty:
+        filtered_cf = cf_df[cf_df["flow_type"] == flow_kind].copy()
+        if search_cf:
+            # Matches if amount starts with/contains input or if date contains input
+            filtered_cf = filtered_cf[
+                filtered_cf["amount"].astype(str).str.contains(search_cf, na=False) |
+                filtered_cf["entry_date"].astype(str).str.contains(search_cf, na=False)
+            ]
+            if filtered_cf.empty:
+                st.warning("⚠️ No matching cash transactions found")
+
+        for _, item in filtered_cf.sort_values(by="entry_date", ascending=False).iterrows():
             item_id = item["id"]
             c_info, c_action = st.columns([4, 1.2])
             with c_info:
                 st.markdown(f"""
                 <div class="entry-card">
-                    <b>Deposit #{item_id} | {item['amount']} {CURRENCY}</b> on {item['entry_date']} ({item['entry_time']})<br>
+                    <b>{flow_kind.capitalize()} #{item_id} | {item['amount']} {CURRENCY}</b> on {item['entry_date']} ({item['entry_time']})<br>
                     Note: {item['notes'] or 'None'}
                 </div>
                 """, unsafe_allow_html=True)
             with c_action:
                 with st.popover("⋮ Actions"):
-                    if st.button("✏️ Edit", key=f"btn_edit_dep_{item_id}", use_container_width=True):
+                    if st.button("✏️ Edit", key=f"btn_edit_cf_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
-                    if st.button("🗑️ Delete", key=f"btn_del_dep_{item_id}", use_container_width=True):
+                    if st.button("🗑️ Delete", key=f"btn_del_cf_{item_id}", use_container_width=True):
                         supabase.table("cash_flows").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted Deposit #{item_id}")
+                        st.success(f"Deleted {flow_kind.capitalize()} #{item_id}")
                         st.rerun()
 
             if st.session_state.active_editing_id == item_id:
-                with st.form(f"edit_form_dep_{item_id}"):
+                with st.form(f"edit_form_cf_{item_id}"):
                     t_date = st.date_input("Date", value=pd.to_datetime(item["entry_date"]).date())
                     t_amt = st.number_input("Amount", value=float(item["amount"]))
                     t_memo = st.text_input("Notes", value=item["notes"] or "")
@@ -951,50 +842,110 @@ elif st.session_state.current_page == "EDIT_DEPOSITS":
                         }
                         supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
                         st.session_state.active_editing_id = None
-                        st.success("✅ Deposit updated!")
+                        st.success(f"✅ {flow_kind.capitalize()} updated!")
                         st.rerun()
-
-# EDIT WITHDRAWALS
-elif st.session_state.current_page == "EDIT_WITHDRAWALS":
-    st.header("✏️ Edit Withdrawals")
-    cfs = load_cash()
-    withdraws = cfs[cfs["flow_type"] == "WITHDRAWAL"] if not cfs.empty else pd.DataFrame()
-
-    if withdraws.empty:
-        st.info("No withdrawal records found.")
     else:
-        for _, item in withdraws.iterrows():
-            item_id = item["id"]
-            c_info, c_action = st.columns([4, 1.2])
-            with c_info:
-                st.markdown(f"""
-                <div class="entry-card">
-                    <b>Withdrawal #{item_id} | {item['amount']} {CURRENCY}</b> on {item['entry_date']} ({item['entry_time']})<br>
-                    Note: {item['notes'] or 'None'}
-                </div>
-                """, unsafe_allow_html=True)
-            with c_action:
-                with st.popover("⋮ Actions"):
-                    if st.button("✏️ Edit", key=f"btn_edit_wd_{item_id}", use_container_width=True):
-                        st.session_state.active_editing_id = item_id
-                    if st.button("🗑️ Delete", key=f"btn_del_wd_{item_id}", use_container_width=True):
-                        supabase.table("cash_flows").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted Withdrawal #{item_id}")
-                        st.rerun()
+        st.info(f"No {flow_kind.lower()} transactions recorded yet.")
 
-            if st.session_state.active_editing_id == item_id:
-                with st.form(f"edit_form_wd_{item_id}"):
-                    t_date = st.date_input("Date", value=pd.to_datetime(item["entry_date"]).date())
-                    t_amt = st.number_input("Amount", value=float(item["amount"]))
-                    t_memo = st.text_input("Notes", value=item["notes"] or "")
+# ------------------------------------------------------------------------------
+# 11. REPORTING PAGES
+# ------------------------------------------------------------------------------
 
-                    if st.form_submit_button("Save Changes", use_container_width=True):
-                        payload = {
-                            "entry_date": t_date.strftime("%Y-%m-%d"),
-                            "amount": float(t_amt),
-                            "notes": t_memo
-                        }
-                        supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
-                        st.session_state.active_editing_id = None
-                        st.success("✅ Withdrawal updated!")
-                        st.rerun()
+# WEEKLY SUMMARY
+elif st.session_state.current_page == "WEEKLY":
+    st.header("📅 Weekly Summary (Monday – Friday)")
+    sells_df = load_sells()
+    if sells_df.empty:
+        st.info("No closed sales records found.")
+    else:
+        w_sym = st.text_input("🔍 Search Stock Symbol by Prefix:", "").strip().upper()
+        if w_sym:
+            sells_df = sells_df[sells_df["symbol"].str.startswith(w_sym, na=False)]
+            if sells_df.empty:
+                st.warning("⚠️ Ticker not available")
+
+        if not sells_df.empty:
+            sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
+            sells_df["Mon_Start"] = sells_df["sale_dt"].apply(lambda d: d - pd.Timedelta(days=d.weekday()))
+            sells_df["Fri_End"] = sells_df["Mon_Start"].apply(lambda d: d + pd.Timedelta(days=4))
+            sells_df["Week_Label"] = sells_df.apply(lambda r: f"Week: {r['Mon_Start'].strftime('%d %b %Y')} to {r['Fri_End'].strftime('%d %b %Y')}", axis=1)
+
+            weeks = sells_df.sort_values(by="Mon_Start", ascending=False)["Week_Label"].unique()
+            chosen_w = st.selectbox("Select Week Period (Latest first):", ["All Weeks"] + list(weeks))
+            target = sells_df if chosen_w == "All Weeks" else sells_df[sells_df["Week_Label"] == chosen_w]
+
+            for _, row in target.sort_values(by="sale_date", ascending=False).iterrows():
+                emoji = "🟢 Profit" if row["net_pnl"] >= 0 else "🔴 Loss"
+                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {emoji} {CURRENCY} {row['net_pnl']:,.2f}")
+
+# MONTHLY SUMMARY
+elif st.session_state.current_page == "MONTHLY":
+    st.header("🗓️ Monthly Summary (1st to Last Day)")
+    sells_df = load_sells()
+    if sells_df.empty:
+        st.info("No closed sales records found.")
+    else:
+        m_sym = st.text_input("🔍 Search Stock Symbol by Prefix:", "").strip().upper()
+        if m_sym:
+            sells_df = sells_df[sells_df["symbol"].str.startswith(m_sym, na=False)]
+            if sells_df.empty:
+                st.warning("⚠️ Ticker not available")
+
+        if not sells_df.empty:
+            sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
+            sells_df["Month_Display"] = sells_df["sale_dt"].dt.strftime("%B %Y")
+            months = sells_df.sort_values(by="sale_dt", ascending=False)["Month_Display"].unique()
+            chosen_m = st.selectbox("Select Month (Latest on top):", ["All Months"] + list(months))
+            target_m = sells_df if chosen_m == "All Months" else sells_df[sells_df["Month_Display"] == chosen_m]
+
+            for _, row in target_m.sort_values(by="sale_date", ascending=False).iterrows():
+                icon = "💰 Profit" if row["net_pnl"] >= 0 else "🔻 Loss"
+                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {icon} {CURRENCY} {row['net_pnl']:,.2f}")
+
+# ANNUAL PERFORMANCE
+elif st.session_state.current_page == "ANNUAL":
+    st.header("🏆 Annual Performance (From Jan 1)")
+    sells_df = load_sells()
+    if sells_df.empty:
+        st.info("No sales records available.")
+    else:
+        y_sym = st.text_input("🔍 Search Stock Symbol by Prefix:", "").strip().upper()
+        if y_sym:
+            sells_df = sells_df[sells_df["symbol"].str.startswith(y_sym, na=False)]
+            if sells_df.empty:
+                st.warning("⚠️ Ticker not available")
+
+        if not sells_df.empty:
+            sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
+            years = sorted(sells_df["sale_dt"].dt.year.unique(), reverse=True)
+            chosen_y = st.selectbox("Select Calendar Year:", years)
+            yr_df = sells_df[sells_df["sale_dt"].dt.year == chosen_y]
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric(f"Gross P&L (Jan 1 – Dec 31, {chosen_y})", f"{CURRENCY} {yr_df['gross_pnl'].sum():,.2f}")
+            c2.metric("Total CGT Deducted", f"{CURRENCY} {yr_df['cgt_tax'].sum():,.2f}")
+            c3.metric("Net Realized Gain/Loss", f"{CURRENCY} {yr_df['net_pnl'].sum():,.2f}")
+
+            st.write("#### Closed Lots")
+            for _, row in yr_df.sort_values(by="sale_date", ascending=False).iterrows():
+                badge = "⭐ Profit" if row["net_pnl"] >= 0 else "❌ Loss"
+                st.markdown(f"**{row['symbol']}** ({row['stock_name']}) | Shares: {row['shares_sold']} | Bought: {row['buy_date']} @ {row['buy_price']} | Sold: {row['sale_date']} @ {row['sale_price']} | **Result:** {badge} {CURRENCY} {row['net_pnl']:,.2f}")
+
+# CAPITAL GAIN TAX
+elif st.session_state.current_page == "CGT":
+    st.header("📊 Capital Gains Tax Ledger")
+    sells_df = load_sells()
+    if sells_df.empty:
+        st.info("No tax records logged.")
+    else:
+        t_sym = st.text_input("🔍 Search Stock Symbol by Prefix:", "").strip().upper()
+        if t_sym:
+            sells_df = sells_df[sells_df["symbol"].str.startswith(t_sym, na=False)]
+            if sells_df.empty:
+                st.warning("⚠️ Ticker not available")
+
+        if not sells_df.empty:
+            cols = ["symbol", "buy_price", "sale_price", "buy_date", "sale_date", "cgt_rate", "cgt_tax", "net_pnl"]
+            cgt_df = sells_df[cols].copy()
+            cgt_df.columns = ["Stock Symbol", "Buy Price", "Sell Price", "Buy Date", "Sell Date", "% Tax Deduction", "Capital Gain Tax", "Net P&L"]
+            st.dataframe(cgt_df, use_container_width=True)
