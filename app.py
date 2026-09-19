@@ -245,7 +245,7 @@ if is_home_page:
     with col_title:
         st.markdown("<div style='text-align:center; font-weight:bold; font-size:16px; margin-top:6px;'>Portfolio Selection</div>", unsafe_allow_html=True)
     with col_pw:
-        if st.button("🔑 Password", use_container_width=True):
+        if st.button("🔑 Change Password", use_container_width=True):
             navigate_to("CHANGE_PW")
     with col_out:
         if st.button("🚪 Logout", use_container_width=True):
@@ -271,7 +271,7 @@ else:
         badge = "Pakistani Stocks" if st.session_state.market == "PK" else "International Stocks"
         st.markdown(f"<div style='text-align:center; font-weight:bold; font-size:16px; margin-top:6px;'>{badge}</div>", unsafe_allow_html=True)
     with col_stat:
-        st.button("🔐 Online", disabled=True, use_container_width=True)
+        st.button("🔐 Logged in", disabled=True, use_container_width=True)
     with col_out:
         if st.button("🚪 Logout", use_container_width=True):
             supabase.auth.sign_out()
@@ -324,7 +324,7 @@ if st.session_state.current_page == "HOME" or st.session_state.market is None:
     _, center_box, _ = st.columns([1, 2, 1])
     with center_box:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
-        st.info("### 🇵🇰 Pakistani Stocks\nDomestic shares, cash balances, and local taxes.")
+        st.info("### Pakistani Stocks")
         if st.button("Open Pakistani Portfolio", use_container_width=True):
             navigate_to("MARKET_MENU", market="PK")
 
