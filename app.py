@@ -324,7 +324,7 @@ if st.session_state.current_page == "HOME" or st.session_state.market is None:
     _, center_box, _ = st.columns([1, 2, 1])
     with center_box:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
-        st.info("### Pakistani Stocks")
+        st.info("### \U0001F1F5\U0001F1F0 Pakistani Stocks")
         if st.button("Open Pakistani Portfolio", use_container_width=True):
             navigate_to("MARKET_MENU", market="PK")
 
