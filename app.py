@@ -151,15 +151,6 @@ st.markdown("""
         margin-top: 4px;
     }
 
-    /* Clean Table Card Borders */
-    .table-border-box {
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 10px;
-        background-color: #0f172a;
-        margin-bottom: 8px;
-    }
-
     @media (max-width: 768px) {
         .pc-only-module {
             display: none !important;
@@ -384,7 +375,6 @@ if st.session_state.current_page == "HOME" or st.session_state.market is None:
 MARKET = st.session_state.market
 CURRENCY = "PKR" if MARKET == "PK" else "USD"
 
-# Data Queries: Latest updated records always returned at the very top (order by id desc)
 def load_buys():
     try:
         res = supabase.table("buy_orders").select("*").eq("market", MARKET).order("id", desc=True).execute()
@@ -490,7 +480,6 @@ if st.session_state.current_page == "MARKET_MENU":
         if not open_lots.empty:
             open_lots["lot_value"] = open_lots["shares_remaining"] * open_lots["price_per_share"]
             
-            # Maintain latest added stocks at the top using max(id)
             agg_dict = {
                 "id": "max",
                 "stock_name": "first",
@@ -504,9 +493,7 @@ if st.session_state.current_page == "MARKET_MENU":
             grouped["avg_price"] = grouped["lot_value"] / grouped["shares_remaining"]
             grouped = grouped.sort_values(by="id", ascending=False).reset_index(drop=True)
 
-            # Sequential Dynamic Indexing (#1, #2, #3...)
             grouped["#"] = range(1, len(grouped) + 1)
-
             grouped["shares_remaining"] = grouped["shares_remaining"].apply(lambda v: f"{v:,.2f}")
             grouped["avg_price"] = grouped["avg_price"].apply(lambda v: f"{v:,.2f}")
             grouped["lot_value"] = grouped["lot_value"].apply(lambda v: f"{v:,.2f}")
@@ -528,14 +515,14 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. ENTRY SUBPAGES (Blank Values, Strict Cash Validation, Sequential Numbers)
+# 10. ENTRY SUBPAGES WITH FREE CASH VALIDATION ON ADD & EDIT
 # ------------------------------------------------------------------------------
 
 # PURCHASE ENTRY
 if st.session_state.current_page == "PURCHASE":
     st.header("➕ Purchase Record Entry")
     free_cash, _ = calculate_financials()
-    st.caption(f"Available Free Cash for purchases: **{CURRENCY} {free_cash:,.2f}**")
+    st.caption(f"Available Free Cash: **{CURRENCY} {free_cash:,.2f}**")
 
     buys_df = load_buys()
     existing_symbols = buys_df["symbol"].unique().tolist() if not buys_df.empty else []
@@ -553,7 +540,6 @@ if st.session_state.current_page == "PURCHASE":
         if sym and sym.strip().upper() in existing_symbols:
             st.info(f"ℹ️ {sym.strip().upper()} exists in your holdings. This entry adds to your total shares.")
 
-        # Completely blank input fields
         shares = st.number_input("Number of Shares", min_value=0.0, value=None, step=1.0, format="%.4f", placeholder="Enter number of shares")
         price = st.number_input(f"Purchase Price per Share ({CURRENCY})", min_value=0.0, value=None, step=0.5, format="%.2f", placeholder="Enter purchase price")
         fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, value=None, step=1.0, format="%.2f", placeholder="Enter fees (if any)")
@@ -575,9 +561,9 @@ if st.session_state.current_page == "PURCHASE":
             else:
                 total_val = (val_shares * val_price) + val_fees + val_taxes
 
-                # STRICT CASH CHECK: Prevent purchase if higher than free cash
+                # STRICT CASH CHECK ON NEW PURCHASE
                 if total_val > free_cash:
-                    st.error(f"❌ Insufficient Free Cash! Available: {CURRENCY} {free_cash:,.2f} | Required: {CURRENCY} {total_val:,.2f}. Please deposit cash first.")
+                    st.error(f"❌ Insufficient Free Cash! Available: {CURRENCY} {free_cash:,.2f} | Required: {CURRENCY} {total_val:,.2f}. Free cash cannot go negative.")
                 else:
                     payload = {
                         "market": str(MARKET),
@@ -611,7 +597,6 @@ if st.session_state.current_page == "PURCHASE":
             if display_buys.empty:
                 st.warning("⚠️ No matching stock symbol found")
 
-        # Table Header Row
         h1, h2, h3, h4, h5, h6, h7 = st.columns([0.8, 1.5, 1.2, 1.2, 1.2, 1.3, 0.8])
         h1.markdown("**#**")
         h2.markdown("**Symbol**")
@@ -621,7 +606,6 @@ if st.session_state.current_page == "PURCHASE":
         h6.markdown("**Total Cost**")
         h7.markdown("**Action**")
 
-        # Dynamic Sequential Re-Indexing (1, 2, 3...)
         for idx, item in display_buys.iterrows():
             item_id = item["id"]
             seq_num = idx + 1
@@ -641,33 +625,49 @@ if st.session_state.current_page == "PURCHASE":
                         st.success(f"Deleted Purchase Record #{seq_num}")
                         st.rerun()
 
+            # INLINE PURCHASE EDIT WITH STRICT CASH VALIDATION
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_buy_{item_id}"):
                     st.write(f"Editing Purchase Record #{seq_num}")
                     sym_val = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
                     name_val = st.text_input("Stock Name", value=item["stock_name"]).strip()
                     date_val = st.date_input("Purchase Date", value=pd.to_datetime(item["purchase_date"]).date())
-                    sh_val = st.number_input("Shares Bought", value=float(item["shares_bought"]))
-                    pr_val = st.number_input("Price per Share", value=float(item["price_per_share"]))
-                    fe_val = st.number_input("Fees", value=float(item["fees"]))
-                    tx_val = st.number_input("Taxes", value=float(item["taxes"]))
+                    sh_val = st.number_input("Shares Bought", value=float(item["shares_bought"]), min_value=0.0001)
+                    pr_val = st.number_input("Price per Share", value=float(item["price_per_share"]), min_value=0.01)
+                    fe_val = st.number_input("Fees", value=float(item["fees"]), min_value=0.0)
+                    tx_val = st.number_input("Taxes", value=float(item["taxes"]), min_value=0.0)
 
                     if st.form_submit_button("Save Changes", use_container_width=True):
                         new_tot = (sh_val * pr_val) + fe_val + tx_val
-                        payload = {
-                            "symbol": sym_val,
-                            "stock_name": name_val,
-                            "purchase_date": date_val.strftime("%Y-%m-%d"),
-                            "shares_bought": float(sh_val),
-                            "price_per_share": float(pr_val),
-                            "fees": float(fe_val),
-                            "taxes": float(tx_val),
-                            "total_cost": round(float(new_tot), 2)
-                        }
-                        supabase.table("buy_orders").update(payload).eq("id", item_id).execute()
-                        st.session_state.active_editing_id = None
-                        st.success("✅ Purchase updated!")
-                        st.rerun()
+                        old_tot = float(item["total_cost"])
+                        delta_cost = new_tot - old_tot
+
+                        # Recalculate live free cash
+                        curr_free_cash, _ = calculate_financials()
+
+                        # STRICT VALIDATION: Check if edit pushes free cash into negative
+                        if delta_cost > curr_free_cash:
+                            st.error(f"❌ Insufficient Free Cash to update! Extra cost: {CURRENCY} {delta_cost:,.2f} | Available Free Cash: {CURRENCY} {curr_free_cash:,.2f}. Free cash cannot go negative.")
+                        else:
+                            # Adjust remaining shares proportionally if shares bought was changed
+                            sold_shares = float(item["shares_bought"]) - float(item["shares_remaining"])
+                            new_remaining = max(0.0, sh_val - sold_shares)
+
+                            payload = {
+                                "symbol": sym_val,
+                                "stock_name": name_val,
+                                "purchase_date": date_val.strftime("%Y-%m-%d"),
+                                "shares_bought": float(sh_val),
+                                "price_per_share": float(pr_val),
+                                "fees": float(fe_val),
+                                "taxes": float(tx_val),
+                                "total_cost": round(float(new_tot), 2),
+                                "shares_remaining": float(new_remaining)
+                            }
+                            supabase.table("buy_orders").update(payload).eq("id", item_id).execute()
+                            st.session_state.active_editing_id = None
+                            st.success("✅ Purchase updated successfully!")
+                            st.rerun()
     else:
         st.info("No purchases recorded yet.")
 
@@ -697,7 +697,6 @@ elif st.session_state.current_page == "SELL":
                 st.info(f"Selected: **{selected_symbol}** ({first_lot['stock_name']}) | Total Available: **{total_avail_shares:,.2f}** shares")
                 s_date = st.date_input("Sale Date", value=date.today())
 
-                # Completely blank input fields
                 shares_to_sell = st.number_input(f"Shares to Sell (Max: {total_avail_shares:,.2f})", min_value=0.0, max_value=total_avail_shares, value=None, step=1.0, format="%.4f", placeholder="Enter shares to sell")
                 sell_price = st.number_input(f"Selling Price per Share ({CURRENCY})", min_value=0.0, value=None, step=0.5, format="%.2f", placeholder="Enter selling price")
                 sell_fees = st.number_input(f"Selling Fees ({CURRENCY})", min_value=0.0, value=None, step=1.0, format="%.2f", placeholder="Enter selling fees (if any)")
@@ -773,7 +772,6 @@ elif st.session_state.current_page == "SELL":
             if display_sells.empty:
                 st.warning("⚠️ No matching stock symbol found")
 
-        # Table Header Row
         sh1, sh2, sh3, sh4, sh5, sh6, sh7 = st.columns([0.8, 1.5, 1.2, 1.2, 1.2, 1.3, 0.8])
         sh1.markdown("**#**")
         sh2.markdown("**Symbol**")
@@ -783,7 +781,6 @@ elif st.session_state.current_page == "SELL":
         sh6.markdown("**Net P&L**")
         sh7.markdown("**Action**")
 
-        # Dynamic Sequential Re-Indexing (1, 2, 3...)
         for idx, item in display_sells.iterrows():
             item_id = item["id"]
             seq_num = idx + 1
@@ -839,10 +836,12 @@ elif st.session_state.current_page == "SELL":
     else:
         st.info("No completed sales recorded yet.")
 
-# DEPOSIT & WITHDRAWAL ENTRY
+# DEPOSIT & WITHDRAWAL ENTRY (STRICT CASH CHECKS)
 elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
     flow_kind = st.session_state.current_page
     st.header(f"{'📥 Cash Deposit' if flow_kind == 'DEPOSIT' else '📤 Cash Withdrawal'}")
+    free_cash, _ = calculate_financials()
+    st.caption(f"Available Free Cash: **{CURRENCY} {free_cash:,.2f}**")
 
     with st.form("cash_flow_form"):
         st.warning("⚠️ Changes are NOT saved until you click 'Save Transaction' below.")
@@ -852,7 +851,6 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         if MARKET == "INTL":
             c_country = st.text_input("Origin/Destination Country", value=None, placeholder="e.g., United States").strip() if c_country else "Pakistan"
 
-        # Completely blank input fields
         amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, value=None, step=100.0, format="%.2f", placeholder="Enter amount")
         memo = st.text_input("Notes (Bank reference, wallet ID, etc.)", value=None, placeholder="Optional notes")
 
@@ -861,6 +859,9 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
             val_amt = float(amt) if amt is not None else 0.0
             if val_amt <= 0:
                 st.error("Please enter a valid amount greater than 0.")
+            # STRICT CHECK ON WITHDRAWAL: Cannot withdraw more than liquid free cash
+            elif flow_kind == "WITHDRAWAL" and val_amt > free_cash:
+                st.error(f"❌ Insufficient Free Cash! Available: {CURRENCY} {free_cash:,.2f} | Requested: {CURRENCY} {val_amt:,.2f}. Free cash cannot go negative.")
             else:
                 payload = {
                     "market": str(MARKET),
@@ -893,7 +894,6 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
             if filtered_cf.empty:
                 st.warning("⚠️ No matching cash transactions found")
 
-        # Table Header Row
         ch1, ch2, ch3, ch4, ch5 = st.columns([0.8, 1.5, 1.5, 2, 0.8])
         ch1.markdown("**#**")
         ch2.markdown("**Date**")
@@ -901,7 +901,6 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         ch4.markdown("**Notes**")
         ch5.markdown("**Action**")
 
-        # Dynamic Sequential Re-Indexing (1, 2, 3...)
         for idx, item in filtered_cf.iterrows():
             item_id = item["id"]
             seq_num = idx + 1
@@ -915,26 +914,42 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
                     if st.button("✏️ Edit", key=f"btn_edit_cf_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_cf_{item_id}", use_container_width=True):
-                        supabase.table("cash_flows").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted {flow_kind.capitalize()} Record #{seq_num}")
-                        st.rerun()
+                        # Block deleting a deposit if it would cause free cash to become negative
+                        if item["flow_type"] == "DEPOSIT" and float(item["amount"]) > free_cash:
+                            st.error(f"❌ Cannot delete this deposit! Doing so would cause free cash to become negative ({CURRENCY} {free_cash - float(item['amount']):,.2f}).")
+                        else:
+                            supabase.table("cash_flows").delete().eq("id", item_id).execute()
+                            st.success(f"Deleted {flow_kind.capitalize()} Record #{seq_num}")
+                            st.rerun()
 
+            # INLINE CASH EDIT WITH STRICT VALIDATION
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_cf_{item_id}"):
                     t_date = st.date_input("Date", value=pd.to_datetime(item["entry_date"]).date())
-                    t_amt = st.number_input("Amount", value=float(item["amount"]))
+                    t_amt = st.number_input("Amount", value=float(item["amount"]), min_value=0.01)
                     t_memo = st.text_input("Notes", value=item["notes"] or "")
 
                     if st.form_submit_button("Save Changes", use_container_width=True):
-                        payload = {
-                            "entry_date": t_date.strftime("%Y-%m-%d"),
-                            "amount": float(t_amt),
-                            "notes": t_memo
-                        }
-                        supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
-                        st.session_state.active_editing_id = None
-                        st.success(f"✅ {flow_kind.capitalize()} updated!")
-                        st.rerun()
+                        live_free_cash, _ = calculate_financials()
+                        new_amt = float(t_amt)
+                        old_amt = float(item["amount"])
+
+                        # If editing withdrawal upwards, ensure sufficient free cash
+                        if flow_kind == "WITHDRAWAL" and (new_amt - old_amt) > live_free_cash:
+                            st.error(f"❌ Cannot increase withdrawal! Additional amount exceeds available Free Cash ({CURRENCY} {live_free_cash:,.2f}).")
+                        # If editing deposit downwards, ensure free cash doesn't fall below zero
+                        elif flow_kind == "DEPOSIT" and (old_amt - new_amt) > live_free_cash:
+                            st.error(f"❌ Cannot decrease deposit! Free cash would drop below zero ({CURRENCY} {live_free_cash - (old_amt - new_amt):,.2f}).")
+                        else:
+                            payload = {
+                                "entry_date": t_date.strftime("%Y-%m-%d"),
+                                "amount": new_amt,
+                                "notes": t_memo
+                            }
+                            supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
+                            st.session_state.active_editing_id = None
+                            st.success(f"✅ {flow_kind.capitalize()} updated!")
+                            st.rerun()
     else:
         st.info(f"No {flow_kind.lower()} transactions recorded yet.")
 
@@ -970,14 +985,13 @@ elif st.session_state.current_page == "WEEKLY":
             tot_wk_tax = target["cgt_tax"].sum()
             tot_wk_net = target["net_pnl"].sum()
 
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Gross P&L", f"{CURRENCY} {tot_wk_gross:,.2f}")
-            k2.metric("CGT Deducted", f"{CURRENCY} {tot_wk_tax:,.2f}")
-            k3.metric("Net Realized Gain/Loss", f"{CURRENCY} {tot_wk_net:,.2f}")
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("Gross P&L", f"{CURRENCY} {tot_wk_gross:,.2f}")
+            kpi2.metric("CGT Deducted", f"{CURRENCY} {tot_wk_tax:,.2f}")
+            kpi3.metric("Net Realized Gain/Loss", f"{CURRENCY} {tot_wk_net:,.2f}")
 
             st.write("---")
 
-            # Bordered Table
             report_df = pd.DataFrame()
             report_df["#"] = range(1, len(target) + 1)
             report_df["Symbol"] = target["symbol"]
@@ -1021,7 +1035,6 @@ elif st.session_state.current_page == "MONTHLY":
 
             st.write("---")
 
-            # Bordered Table
             report_df = pd.DataFrame()
             report_df["#"] = range(1, len(target_m) + 1)
             report_df["Symbol"] = target_m["symbol"]
@@ -1059,7 +1072,6 @@ elif st.session_state.current_page == "ANNUAL":
 
             st.write("---")
 
-            # Bordered Table
             report_df = pd.DataFrame()
             report_df["#"] = range(1, len(yr_df) + 1)
             report_df["Symbol"] = yr_df["symbol"]
