@@ -122,7 +122,7 @@ st.markdown("""
         border: none !important;
     }
 
-    /* Dual Metric Banner (Equity & Free Cash) */
+    /* Dual Metric Banner */
     .metric-banner {
         display: flex;
         justify-content: space-between;
@@ -151,12 +151,24 @@ st.markdown("""
         margin-top: 4px;
     }
 
-    .entry-card {
+    /* Clean Table Row Styling */
+    .table-header {
         background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 6px;
+        color: #94a3b8;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 10px 8px;
+        border-radius: 6px;
+        margin-bottom: 8px;
+    }
+    .table-row {
+        background-color: #0f172a;
+        border-bottom: 1px solid #1e293b;
+        color: #f8fafc;
+        font-size: 14px;
+        padding: 8px 8px;
+        display: flex;
+        align-items: center;
     }
 
     @media (max-width: 768px) {
@@ -416,13 +428,8 @@ def calculate_financials():
     total_buy_spend = buys_df["total_cost"].sum() if not buys_df.empty else 0.0
     total_sell_revenue = ((sells_df["shares_sold"] * sells_df["sale_price"]) - sells_df["selling_fees"] - sells_df["cgt_tax"]).sum() if not sells_df.empty else 0.0
 
-    # Free Cash: Available liquid balance
     free_cash = (total_dep - total_wth) - total_buy_spend + total_sell_revenue
-
-    # Current value of open shares
     open_holdings_val = (buys_df["shares_remaining"] * buys_df["price_per_share"]).sum() if not buys_df.empty else 0.0
-
-    # Total Equity: Liquid cash + Value of holdings
     total_equity = free_cash + open_holdings_val
 
     return free_cash, total_equity
@@ -433,7 +440,6 @@ def calculate_financials():
 if st.session_state.current_page == "MARKET_MENU":
     free_cash, total_equity = calculate_financials()
 
-    # Dual Card Banner: Total Equity & Free Cash
     st.markdown(f"""
     <div class="metric-banner">
         <div class="metric-card-box">
@@ -447,7 +453,6 @@ if st.session_state.current_page == "MARKET_MENU":
     </div>
     """, unsafe_allow_html=True)
 
-    # Centered Half-Width Buttons [1, 2, 1]
     _, btn_center_col, _ = st.columns([1, 2, 1])
     with btn_center_col:
         st.markdown('<div class="menu-button-box">', unsafe_allow_html=True)
@@ -484,17 +489,43 @@ if st.session_state.current_page == "MARKET_MENU":
     st.subheader("🔍 Current Open Holdings")
     buys_df = load_buys()
     search_sym = st.text_input("Search Stock Symbol:", "").strip().upper()
+    
     if not buys_df.empty:
         open_lots = buys_df[buys_df["shares_remaining"] > 0].copy()
         if search_sym:
             open_lots = open_lots[open_lots["symbol"].str.startswith(search_sym, na=False)]
             if open_lots.empty:
                 st.warning("⚠️ Ticker not available")
+        
         if not open_lots.empty:
-            cols = ["symbol", "stock_name", "purchase_date", "shares_bought", "shares_remaining", "price_per_share", "total_cost"]
+            # AGGREGATION: Combine multiple lots of the same stock into one consolidated holding row
+            open_lots["lot_value"] = open_lots["shares_remaining"] * open_lots["price_per_share"]
+            
+            agg_dict = {
+                "stock_name": "first",
+                "shares_remaining": "sum",
+                "lot_value": "sum"
+            }
             if MARKET == "INTL":
-                cols.insert(2, "country")
-            st.dataframe(open_lots[cols], use_container_width=True)
+                agg_dict["country"] = "first"
+
+            grouped = open_lots.groupby("symbol", as_index=False).agg(agg_dict)
+            grouped["avg_price"] = grouped["lot_value"] / grouped["shares_remaining"]
+
+            grouped["shares_remaining"] = grouped["shares_remaining"].apply(lambda v: f"{v:,.2f}")
+            grouped["avg_price"] = grouped["avg_price"].apply(lambda v: f"{v:,.2f}")
+            grouped["lot_value"] = grouped["lot_value"].apply(lambda v: f"{v:,.2f}")
+
+            cols_order = ["symbol", "stock_name", "shares_remaining", "avg_price", "lot_value"]
+            col_labels = ["Symbol", "Stock Name", "Total Shares", f"Avg Buy Price ({CURRENCY})", f"Total Value ({CURRENCY})"]
+
+            if MARKET == "INTL":
+                cols_order.insert(2, "country")
+                col_labels.insert(2, "Country")
+
+            display_grouped = grouped[cols_order].copy()
+            display_grouped.columns = col_labels
+            st.dataframe(display_grouped, use_container_width=True, hide_index=True)
         else:
             st.info("No active open shares currently held.")
     else:
@@ -502,7 +533,7 @@ if st.session_state.current_page == "MARKET_MENU":
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 10. ENTRY SUBPAGES WITH INLINE HISTORY & REAL-TIME SEARCH
+# 10. ENTRY SUBPAGES WITH CLEAN TABULAR DISPLAY & NO DEFAULT VALUES
 # ------------------------------------------------------------------------------
 
 # PURCHASE ENTRY
@@ -516,28 +547,31 @@ if st.session_state.current_page == "PURCHASE":
         p_date = st.date_input("Purchase Date", value=date.today())
         country_val = "Pakistan"
         if MARKET == "INTL":
-            country_val = st.text_input("Country", value="United States").strip()
+            country_val = st.text_input("Country", value="").strip()
 
-        sym = st.text_input("Stock Symbol (e.g., SYS, OGDC, AAPL)").strip().upper()
-        s_name = st.text_input("Stock Name (e.g., Systems Limited, Apple Inc.)").strip()
+        sym = st.text_input("Stock Symbol (e.g., SYS, OGDC, AAPL)", value="").strip().upper()
+        s_name = st.text_input("Stock Name (e.g., Systems Limited, Apple Inc.)", value="").strip()
 
         if sym and sym in existing_symbols:
-            st.info(f"ℹ️ {sym} exists in your holdings. This entry adds a new distinct tracking lot.")
+            st.info(f"ℹ️ {sym} exists in your holdings. This entry adds to your total shares.")
 
-        shares = st.number_input("Number of Shares", min_value=0.0001, step=1.0, format="%.4f")
-        price = st.number_input(f"Purchase Price per Share ({CURRENCY})", min_value=0.01, step=0.5, format="%.2f")
-        fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, step=1.0, format="%.2f")
-        taxes = st.number_input(f"Levies / Taxes ({CURRENCY})", min_value=0.0, step=1.0, format="%.2f")
+        # Zero defaults
+        shares = st.number_input("Number of Shares", min_value=0.0, value=0.0, step=1.0, format="%.4f")
+        price = st.number_input(f"Purchase Price per Share ({CURRENCY})", min_value=0.0, value=0.0, step=0.5, format="%.2f")
+        fees = st.number_input(f"Brokerage Commission ({CURRENCY})", min_value=0.0, value=0.0, step=1.0, format="%.2f")
+        taxes = st.number_input(f"Levies / Taxes ({CURRENCY})", min_value=0.0, value=0.0, step=1.0, format="%.2f")
 
         save_p = st.form_submit_button("Save Purchase Changes", use_container_width=True)
         if save_p:
             if not sym or not s_name:
                 st.error("Please enter both Stock Symbol and Stock Name.")
+            elif shares <= 0 or price <= 0:
+                st.error("Please enter a valid number of shares and price per share.")
             else:
                 total_val = (shares * price) + fees + taxes
                 payload = {
                     "market": str(MARKET),
-                    "country": str(country_val),
+                    "country": str(country_val) if country_val else "Pakistan",
                     "purchase_date": p_date.strftime("%Y-%m-%d"),
                     "symbol": str(sym),
                     "stock_name": str(s_name),
@@ -557,9 +591,7 @@ if st.session_state.current_page == "PURCHASE":
 
     st.write("---")
     st.subheader("📜 Recorded Purchases")
-    
-    # Real-time search by stock symbol prefix
-    search_p = st.text_input("🔍 Search Purchase by Symbol (e.g., B, BA, AAPL):", key="search_p_sym").strip().upper()
+    search_p = st.text_input("🔍 Search Purchase by Symbol (e.g., B, BA):", key="search_p_sym").strip().upper()
     
     buys_all = load_buys()
     if not buys_all.empty:
@@ -569,26 +601,35 @@ if st.session_state.current_page == "PURCHASE":
             if display_buys.empty:
                 st.warning("⚠️ No matching stock symbol found")
 
+        # Table Header Row
+        h1, h2, h3, h4, h5, h6, h7 = st.columns([1, 1.5, 1.2, 1, 1, 1.2, 0.8])
+        h1.markdown("**ID**")
+        h2.markdown("**Symbol**")
+        h3.markdown("**Date**")
+        h4.markdown("**Shares**")
+        h5.markdown("**Price**")
+        h6.markdown("**Total Cost**")
+        h7.markdown("**Action**")
+
         for _, item in display_buys.sort_values(by="purchase_date", ascending=False).iterrows():
             item_id = item["id"]
-            c_info, c_action = st.columns([4, 1.2])
-            with c_info:
-                st.markdown(f"""
-                <div class="entry-card">
-                    <b>ID #{item_id} | {item['symbol']} ({item['stock_name']})</b><br>
-                    Bought: {item['shares_bought']} sh @ {item['price_per_share']} {CURRENCY} on {item['purchase_date']} | Rem: {item['shares_remaining']} sh | Total: {item['total_cost']} {CURRENCY}
-                </div>
-                """, unsafe_allow_html=True)
-            with c_action:
-                with st.popover("⋮ Actions"):
+            c1, c2, c3, c4, c5, c6, c7 = st.columns([1, 1.5, 1.2, 1, 1, 1.2, 0.8])
+            c1.write(f"#{item_id}")
+            c2.write(f"{item['symbol']}")
+            c3.write(f"{item['purchase_date']}")
+            c4.write(f"{item['shares_bought']:,.2f}")
+            c5.write(f"{item['price_per_share']:,.2f}")
+            c6.write(f"{item['total_cost']:,.2f}")
+            with c7:
+                with st.popover("⋮"):
                     if st.button("✏️ Edit", key=f"btn_edit_buy_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_buy_{item_id}", use_container_width=True):
-                        # Independent deletion of order record without altering portfolio holding quantities
                         supabase.table("buy_orders").delete().eq("id", item_id).execute()
                         st.success(f"Deleted Purchase Entry #{item_id}")
                         st.rerun()
 
+            # Inline Edit Form
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_buy_{item_id}"):
                     st.write(f"Editing Purchase ID #{item_id}")
@@ -645,14 +686,18 @@ elif st.session_state.current_page == "SELL":
                 st.warning("⚠️ Changes are NOT saved until you click 'Save Sell Changes' below.")
                 s_date = st.date_input("Sale Date", value=date.today())
                 avail = float(lot["shares_remaining"])
-                shares_to_sell = st.number_input(f"Shares to Sell (Available: {avail})", min_value=0.0001, max_value=avail, step=1.0, format="%.4f")
-                sell_price = st.number_input(f"Selling Price per Share ({CURRENCY})", min_value=0.01, step=0.5, format="%.2f")
-                sell_fees = st.number_input(f"Selling Fees ({CURRENCY})", min_value=0.0, step=1.0, format="%.2f")
-                cgt_rate = st.number_input("Capital Gain Tax %", min_value=0.0, max_value=100.0, value=15.0, step=0.5)
+
+                # Zero defaults
+                shares_to_sell = st.number_input(f"Shares to Sell (Available: {avail})", min_value=0.0, max_value=avail, value=0.0, step=1.0, format="%.4f")
+                sell_price = st.number_input(f"Selling Price per Share ({CURRENCY})", min_value=0.0, value=0.0, step=0.5, format="%.2f")
+                sell_fees = st.number_input(f"Selling Fees ({CURRENCY})", min_value=0.0, value=0.0, step=1.0, format="%.2f")
+                cgt_rate = st.number_input("Capital Gain Tax %", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
 
                 save_s = st.form_submit_button("Save Sell Changes", use_container_width=True)
                 if save_s:
-                    if shares_to_sell > avail:
+                    if shares_to_sell <= 0 or sell_price <= 0:
+                        st.error("Please enter a valid number of shares and selling price.")
+                    elif shares_to_sell > avail:
                         st.error("❌ Sale quantity exceeds available shares!")
                     else:
                         unit_cost = float(lot["total_cost"]) / float(lot["shares_bought"])
@@ -691,9 +736,7 @@ elif st.session_state.current_page == "SELL":
 
     st.write("---")
     st.subheader("📜 Recorded Sales")
-    
-    # Real-time search for sell logs
-    search_s = st.text_input("🔍 Search Sold Records by Symbol Prefix (e.g., B, BA, AAPL):", key="search_s_sym").strip().upper()
+    search_s = st.text_input("🔍 Search Sold Records by Symbol Prefix (e.g., B, BA):", key="search_s_sym").strip().upper()
     
     sells_all = load_sells()
     if not sells_all.empty:
@@ -703,18 +746,27 @@ elif st.session_state.current_page == "SELL":
             if display_sells.empty:
                 st.warning("⚠️ No matching stock symbol found")
 
+        # Table Header Row
+        sh1, sh2, sh3, sh4, sh5, sh6, sh7 = st.columns([1, 1.5, 1.2, 1, 1, 1.2, 0.8])
+        sh1.markdown("**ID**")
+        sh2.markdown("**Symbol**")
+        sh3.markdown("**Date**")
+        sh4.markdown("**Shares**")
+        sh5.markdown("**Price**")
+        sh6.markdown("**Net P&L**")
+        sh7.markdown("**Action**")
+
         for _, item in display_sells.sort_values(by="sale_date", ascending=False).iterrows():
             item_id = item["id"]
-            c_info, c_action = st.columns([4, 1.2])
-            with c_info:
-                st.markdown(f"""
-                <div class="entry-card">
-                    <b>ID #{item_id} | {item['symbol']} ({item['stock_name']})</b><br>
-                    Sold: {item['shares_sold']} sh @ {item['sale_price']} {CURRENCY} on {item['sale_date']} | Net P&L: {item['net_pnl']} {CURRENCY}
-                </div>
-                """, unsafe_allow_html=True)
-            with c_action:
-                with st.popover("⋮ Actions"):
+            sc1, sc2, sc3, sc4, sc5, sc6, sc7 = st.columns([1, 1.5, 1.2, 1, 1, 1.2, 0.8])
+            sc1.write(f"#{item_id}")
+            sc2.write(f"{item['symbol']}")
+            sc3.write(f"{item['sale_date']}")
+            sc4.write(f"{item['shares_sold']:,.2f}")
+            sc5.write(f"{item['sale_price']:,.2f}")
+            sc6.write(f"{item['net_pnl']:,.2f}")
+            with sc7:
+                with st.popover("⋮"):
                     if st.button("✏️ Edit", key=f"btn_edit_sell_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_sell_{item_id}", use_container_width=True):
@@ -769,39 +821,41 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         e_time = st.time_input("Transaction Time", value=time(12, 0))
         c_country = "Pakistan"
         if MARKET == "INTL":
-            c_country = st.text_input("Origin/Destination Country", value="United States")
-        amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.01, step=100.0, format="%.2f")
-        memo = st.text_input("Notes (Bank reference, wallet ID, etc.)")
+            c_country = st.text_input("Origin/Destination Country", value="").strip()
+
+        # Zero defaults
+        amt = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, value=0.0, step=100.0, format="%.2f")
+        memo = st.text_input("Notes (Bank reference, wallet ID, etc.)", value="")
 
         save_c = st.form_submit_button("Save Transaction", use_container_width=True)
         if save_c:
-            payload = {
-                "market": str(MARKET),
-                "country": str(c_country),
-                "entry_date": e_date.strftime("%Y-%m-%d"),
-                "entry_time": e_time.strftime("%H:%M:%S"),
-                "flow_type": str(flow_kind),
-                "amount": float(amt),
-                "notes": str(memo) if memo else None
-            }
-            try:
-                supabase.table("cash_flows").insert(payload).execute()
-                st.success(f"✅ {flow_kind} of {CURRENCY} {amt:,.2f} recorded successfully!")
-                st.rerun()
-            except Exception as err:
-                st.error(f"Failed to record transaction: {err}")
+            if amt <= 0:
+                st.error("Please enter a valid amount greater than 0.")
+            else:
+                payload = {
+                    "market": str(MARKET),
+                    "country": str(c_country) if c_country else "Pakistan",
+                    "entry_date": e_date.strftime("%Y-%m-%d"),
+                    "entry_time": e_time.strftime("%H:%M:%S"),
+                    "flow_type": str(flow_kind),
+                    "amount": float(amt),
+                    "notes": str(memo) if memo else None
+                }
+                try:
+                    supabase.table("cash_flows").insert(payload).execute()
+                    st.success(f"✅ {flow_kind} of {CURRENCY} {amt:,.2f} recorded successfully!")
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"Failed to record transaction: {err}")
 
     st.write("---")
     st.subheader(f"📜 Recorded {flow_kind.capitalize()}s")
-
-    # Real-time search for cash flows by Amount or Date string
-    search_cf = st.text_input(f"🔍 Search {flow_kind.capitalize()} by Amount or Date (e.g., 15, 2026-09):", key="search_cf_txt").strip()
+    search_cf = st.text_input(f"🔍 Search by Amount or Date (e.g., 15, 2026-09):", key="search_cf_txt").strip()
 
     cf_df = load_cash()
     if not cf_df.empty:
         filtered_cf = cf_df[cf_df["flow_type"] == flow_kind].copy()
         if search_cf:
-            # Matches if amount starts with/contains input or if date contains input
             filtered_cf = filtered_cf[
                 filtered_cf["amount"].astype(str).str.contains(search_cf, na=False) |
                 filtered_cf["entry_date"].astype(str).str.contains(search_cf, na=False)
@@ -809,18 +863,23 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
             if filtered_cf.empty:
                 st.warning("⚠️ No matching cash transactions found")
 
+        # Table Header Row
+        ch1, ch2, ch3, ch4, ch5 = st.columns([1, 1.5, 1.5, 2, 0.8])
+        ch1.markdown("**ID**")
+        ch2.markdown("**Date**")
+        ch3.markdown("**Amount**")
+        ch4.markdown("**Notes**")
+        ch5.markdown("**Action**")
+
         for _, item in filtered_cf.sort_values(by="entry_date", ascending=False).iterrows():
             item_id = item["id"]
-            c_info, c_action = st.columns([4, 1.2])
-            with c_info:
-                st.markdown(f"""
-                <div class="entry-card">
-                    <b>{flow_kind.capitalize()} #{item_id} | {item['amount']} {CURRENCY}</b> on {item['entry_date']} ({item['entry_time']})<br>
-                    Note: {item['notes'] or 'None'}
-                </div>
-                """, unsafe_allow_html=True)
-            with c_action:
-                with st.popover("⋮ Actions"):
+            cc1, cc2, cc3, cc4, cc5 = st.columns([1, 1.5, 1.5, 2, 0.8])
+            cc1.write(f"#{item_id}")
+            cc2.write(f"{item['entry_date']}")
+            cc3.write(f"{item['amount']:,.2f}")
+            cc4.write(f"{item['notes'] or '-'}")
+            with cc5:
+                with st.popover("⋮"):
                     if st.button("✏️ Edit", key=f"btn_edit_cf_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_cf_{item_id}", use_container_width=True):
@@ -948,4 +1007,4 @@ elif st.session_state.current_page == "CGT":
             cols = ["symbol", "buy_price", "sale_price", "buy_date", "sale_date", "cgt_rate", "cgt_tax", "net_pnl"]
             cgt_df = sells_df[cols].copy()
             cgt_df.columns = ["Stock Symbol", "Buy Price", "Sell Price", "Buy Date", "Sell Date", "% Tax Deduction", "Capital Gain Tax", "Net P&L"]
-            st.dataframe(cgt_df, use_container_width=True)
+            st.dataframe(cgt_df, use_container_width=True, hide_index=True)
