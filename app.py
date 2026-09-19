@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date, time
 from supabase import create_client, Client
 
-st.set_page_config(page_title="AlphaPortfolio Tracker", page_icon="📈", layout="centered")
+st.set_page_config(page_title="Stock Trading Tracker", page_icon="📈", layout="centered")
 
 # ------------------------------------------------------------------------------
 # 1. MOBILE HARDWARE BACK-BUTTON INTERCEPTOR & UNSAVED ALERT
