@@ -99,7 +99,8 @@ st.markdown("""
         color: white !important;
         border: none !important;
     }
-    div[data-testid="stButton"] button:has-text("➖ Sell Record") {
+    div[data-testid="stButton"] button:has-text("➖ Sell Record"),
+    div[data-testid="stButton"] button:has-text("🏛️ Add Capital Gain Tax Deduction") {
         background-color: #ef4444 !important;
         color: white !important;
         border: none !important;
@@ -187,11 +188,9 @@ if "auth_view" not in st.session_state:
 if "active_editing_id" not in st.session_state:
     st.session_state.active_editing_id = None
 
-# Check if opened from email recovery link
 query_params = st.query_params
 if "code" in query_params or query_params.get("type") == "recovery":
     st.session_state.auth_view = "RESET_PASSWORD"
-    recovery_code = query_params.get("code", "")
 
 def navigate_to(page, market=None):
     st.session_state.nav_stack.append((st.session_state.market, st.session_state.current_page))
@@ -218,7 +217,6 @@ def go_back():
 if not st.session_state.authenticated:
     st.markdown("<h2 style='text-align: center;'>🔐 Trader Portal</h2>", unsafe_allow_html=True)
     
-    # CASE A: User clicked the recovery link in their email
     if st.session_state.auth_view == "RESET_PASSWORD":
         st.subheader("🔑 Set New Password")
         st.write("Enter your new password below:")
@@ -234,7 +232,6 @@ if not st.session_state.authenticated:
                     st.error("Passwords do not match.")
                 else:
                     try:
-                        # Verify the token and set the new password
                         if "code" in query_params:
                             supabase.auth.verify_otp({"token_hash": query_params["code"], "type": "recovery"})
                         supabase.auth.update_user({"password": new_p1})
@@ -250,7 +247,6 @@ if not st.session_state.authenticated:
             st.session_state.auth_view = "LOGIN"
             st.rerun()
 
-    # CASE B: Standard Login Screen
     elif st.session_state.auth_view == "LOGIN":
         st.markdown('<div class="login-form-box">', unsafe_allow_html=True)
         with st.form("login_form"):
@@ -277,7 +273,6 @@ if not st.session_state.authenticated:
                 st.session_state.auth_view = "FORGOT"
                 st.rerun()
 
-    # CASE C: Forgot Password Request
     elif st.session_state.auth_view == "FORGOT":
         st.write("Enter your email to receive recovery instructions.")
         with st.form("forgot_form"):
@@ -355,7 +350,7 @@ else:
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
-# 7. CHANGE PASSWORD VIEW (WHEN LOGGED IN)
+# 7. CHANGE PASSWORD VIEW
 # ------------------------------------------------------------------------------
 if st.session_state.current_page == "CHANGE_PW":
     st.header("🔑 Change Password")
@@ -429,22 +424,44 @@ def load_cash():
     except Exception:
         return pd.DataFrame()
 
+def load_cgt_deductions():
+    try:
+        res = supabase.table("cgt_deductions").select("*").eq("market", MARKET).order("id", desc=True).execute()
+        return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
 def calculate_financials():
     cash_df = load_cash()
     buys_df = load_buys()
     sells_df = load_sells()
+    cgt_ded_df = load_cgt_deductions()
 
     total_dep = cash_df[cash_df["flow_type"] == "DEPOSIT"]["amount"].sum() if not cash_df.empty else 0.0
     total_wth = cash_df[cash_df["flow_type"] == "WITHDRAWAL"]["amount"].sum() if not cash_df.empty else 0.0
 
     total_buy_spend = buys_df["total_cost"].sum() if not buys_df.empty else 0.0
     total_sell_revenue = ((sells_df["shares_sold"] * sells_df["sale_price"]) - sells_df["selling_fees"] - sells_df["cgt_tax"]).sum() if not sells_df.empty else 0.0
+    standalone_cgt_deductions = cgt_ded_df["tax_amount"].sum() if not cgt_ded_df.empty else 0.0
 
-    free_cash = (total_dep - total_wth) - total_buy_spend + total_sell_revenue
+    free_cash = (total_dep - total_wth) - total_buy_spend + total_sell_revenue - standalone_cgt_deductions
     open_holdings_val = (buys_df["shares_remaining"] * buys_df["price_per_share"]).sum() if not buys_df.empty else 0.0
     total_equity = free_cash + open_holdings_val
 
     return free_cash, total_equity
+
+# Helper: Calculate Holding Days & Return %
+def enrich_sales_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.copy()
+    buy_dt = pd.to_datetime(df["buy_date"], errors="coerce")
+    sale_dt = pd.to_datetime(df["sale_date"], errors="coerce")
+    df["days_held"] = (sale_dt - buy_dt).dt.days.fillna(0).astype(int)
+    
+    cost_basis = df["shares_sold"] * df["buy_price"]
+    df["pnl_pct"] = df.apply(lambda r: ((r["net_pnl"] / (r["shares_sold"] * r["buy_price"])) * 100.0) if (r["shares_sold"] * r["buy_price"]) > 0 else 0.0, axis=1)
+    return df
 
 # ------------------------------------------------------------------------------
 # 9. DEDICATED MARKET OPTIONS MENU PAGE
@@ -474,6 +491,9 @@ if st.session_state.current_page == "MARKET_MENU":
 
         if st.button("➖ Sell Record", use_container_width=True):
             navigate_to("SELL")
+
+        if st.button("🏛️ Add Capital Gain Tax Deduction", use_container_width=True):
+            navigate_to("ADD_CGT_DEDUCTION")
 
         if st.button("📥 Deposit", use_container_width=True):
             navigate_to("DEPOSIT")
@@ -699,7 +719,7 @@ if st.session_state.current_page == "PURCHASE":
     else:
         st.info("No purchases recorded yet.")
 
-# SELL ENTRY
+# SELL ENTRY (Calculates Holding Days & P&L % Automatically)
 elif st.session_state.current_page == "SELL":
     st.header("➖ Sell Record Entry")
     buys_df = load_buys()
@@ -744,6 +764,8 @@ elif st.session_state.current_page == "SELL":
                     else:
                         remaining_to_sell = val_shares_sell
                         total_net_pnl = 0.0
+                        total_cost_basis = 0.0
+                        max_days_held = 0
 
                         for _, lot_row in symbol_lots.iterrows():
                             if remaining_to_sell <= 0:
@@ -759,6 +781,11 @@ elif st.session_state.current_page == "SELL":
                             lot_gross_pnl = gross_rev - cost_basis - allocated_fee
                             lot_tax = (lot_gross_pnl * (val_cgt_rate / 100.0)) if lot_gross_pnl > 0 else 0.0
                             lot_net_pnl = lot_gross_pnl - lot_tax
+
+                            # Calculate holding duration in days
+                            buy_dt = pd.to_datetime(lot_row["purchase_date"]).date()
+                            days_held = max(0, (s_date - buy_dt).days)
+                            max_days_held = max(max_days_held, days_held)
 
                             sell_payload = {
                                 "buy_order_id": int(lot_row["id"]),
@@ -782,8 +809,10 @@ elif st.session_state.current_page == "SELL":
 
                             remaining_to_sell -= shares_from_lot
                             total_net_pnl += lot_net_pnl
+                            total_cost_basis += cost_basis
 
-                        st.success(f"✅ Sale logged for {val_shares_sell} shares of {selected_symbol}! Total Net P&L: {CURRENCY} {total_net_pnl:,.2f}")
+                        overall_pnl_pct = (total_net_pnl / total_cost_basis * 100.0) if total_cost_basis > 0 else 0.0
+                        st.success(f"✅ Sale logged for {val_shares_sell} shares of {selected_symbol}! Held: {max_days_held} days | Net P&L: {CURRENCY} {total_net_pnl:,.2f} ({overall_pnl_pct:+.2f}%)")
                         st.rerun()
         else:
             st.info("No open stock positions currently available to sell.")
@@ -794,32 +823,35 @@ elif st.session_state.current_page == "SELL":
     
     sells_all = load_sells()
     if not sells_all.empty:
-        display_sells = sells_all.sort_values(by="id", ascending=False).reset_index(drop=True)
+        sells_enriched = enrich_sales_metrics(sells_all)
+        display_sells = sells_enriched.sort_values(by="id", ascending=False).reset_index(drop=True)
         if search_s:
             display_sells = display_sells[display_sells["symbol"].str.startswith(search_s, na=False)].reset_index(drop=True)
             if display_sells.empty:
                 st.warning("⚠️ No matching stock symbol found")
 
-        sh1, sh2, sh3, sh4, sh5, sh6, sh7 = st.columns([0.8, 1.5, 1.2, 1.2, 1.2, 1.3, 0.8])
+        sh1, sh2, sh3, sh4, sh5, sh6, sh7, sh8 = st.columns([0.6, 1.2, 1.1, 0.9, 1.1, 1.2, 1.0, 0.7])
         sh1.markdown("**#**")
         sh2.markdown("**Symbol**")
         sh3.markdown("**Date**")
-        sh4.markdown("**Shares**")
-        sh5.markdown("**Price**")
+        sh4.markdown("**Days**")
+        sh5.markdown("**Shares**")
         sh6.markdown("**Net P&L**")
-        sh7.markdown("**Action**")
+        sh7.markdown("**P&L %**")
+        sh8.markdown("**Action**")
 
         for idx, item in display_sells.iterrows():
             item_id = item["id"]
             seq_num = idx + 1
-            sc1, sc2, sc3, sc4, sc5, sc6, sc7 = st.columns([0.8, 1.5, 1.2, 1.2, 1.2, 1.3, 0.8])
+            sc1, sc2, sc3, sc4, sc5, sc6, sc7, sc8 = st.columns([0.6, 1.2, 1.1, 0.9, 1.1, 1.2, 1.0, 0.7])
             sc1.write(f"{seq_num}")
             sc2.write(f"{item['symbol']}")
             sc3.write(f"{item['sale_date']}")
-            sc4.write(f"{item['shares_sold']:,.2f}")
-            sc5.write(f"{item['sale_price']:,.2f}")
+            sc4.write(f"{item['days_held']}d")
+            sc5.write(f"{item['shares_sold']:,.2f}")
             sc6.write(f"{item['net_pnl']:,.2f}")
-            with sc7:
+            sc7.write(f"{item['pnl_pct']:+.2f}%")
+            with sc8:
                 with st.popover("⋮"):
                     if st.button("✏️ Edit", key=f"btn_edit_sell_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
@@ -863,6 +895,130 @@ elif st.session_state.current_page == "SELL":
                         st.rerun()
     else:
         st.info("No completed sales recorded yet.")
+
+# NEW FUNCTION: ADD CAPITAL GAIN TAX DEDUCTION
+elif st.session_state.current_page == "ADD_CGT_DEDUCTION":
+    st.header("🏛️ Add Capital Gain Tax Deduction")
+    free_cash, _ = calculate_financials()
+    st.caption(f"Available Free Cash: **{CURRENCY} {free_cash:,.2f}**")
+
+    with st.form("cgt_deduction_form"):
+        st.warning("⚠️ Changes are NOT saved until you click 'Save Tax Deduction' below.")
+        d_date = st.date_input("Date of Deduction", value=date.today())
+
+        d_country = "Pakistan"
+        if MARKET == "INTL":
+            d_country = st.text_input("Country", value="", placeholder="e.g., United States")
+
+        d_sym = st.text_input("Stock Symbol", value="", placeholder="e.g., SYS, OGDC, AAPL")
+        d_company = st.text_input("Stock Company Name", value="", placeholder="e.g., Systems Limited, Apple Inc.")
+        d_shares = st.number_input("Total Shares", min_value=0.0, value=None, step=1.0, format="%.4f", placeholder="Enter total shares")
+        d_tax_amt = st.number_input(f"Capital Gain Tax Deducted ({CURRENCY})", min_value=0.0, value=None, step=10.0, format="%.2f", placeholder="Enter deducted tax amount")
+        d_notes = st.text_input("Notes (Optional reference)", value="", placeholder="e.g., NCCPL annual CGT deduction")
+
+        save_d = st.form_submit_button("Save Tax Deduction", use_container_width=True)
+        if save_d:
+            clean_sym = d_sym.strip().upper() if d_sym else ""
+            clean_comp = d_company.strip() if d_company else ""
+            clean_country = d_country.strip() if d_country else "Pakistan"
+            val_shares = float(d_shares) if d_shares is not None else 0.0
+            val_tax = float(d_tax_amt) if d_tax_amt is not None else 0.0
+
+            if not clean_sym or not clean_comp:
+                st.error("Please enter both Stock Symbol and Stock Company Name.")
+            elif val_shares <= 0 or val_tax <= 0:
+                st.error("Please enter valid Total Shares and Tax Amount greater than 0.")
+            elif val_tax > free_cash:
+                st.error(f"❌ Insufficient Free Cash! Available: {CURRENCY} {free_cash:,.2f} | Deduction: {CURRENCY} {val_tax:,.2f}. Free cash cannot go negative.")
+            else:
+                payload = {
+                    "market": str(MARKET),
+                    "country": clean_country,
+                    "deduction_date": d_date.strftime("%Y-%m-%d"),
+                    "symbol": clean_sym,
+                    "stock_name": clean_comp,
+                    "total_shares": val_shares,
+                    "tax_amount": round(val_tax, 2),
+                    "notes": str(d_notes).strip() if d_notes else None
+                }
+                try:
+                    supabase.table("cgt_deductions").insert(payload).execute()
+                    st.success(f"✅ CGT Deduction of {CURRENCY} {val_tax:,.2f} for {clean_sym} recorded!")
+                    st.rerun()
+                except Exception as err:
+                    st.error(f"Error saving tax deduction: {err}")
+
+    st.write("---")
+    st.subheader("📜 Recorded CGT Deductions")
+    search_cgt = st.text_input("🔍 Search Deduction by Symbol (e.g., B, BA):", key="search_cgt_sym", value="").strip().upper()
+
+    cgt_ded_all = load_cgt_deductions()
+    if not cgt_ded_all.empty:
+        display_cgt = cgt_ded_all.sort_values(by="id", ascending=False).reset_index(drop=True)
+        if search_cgt:
+            display_cgt = display_cgt[display_cgt["symbol"].str.startswith(search_cgt, na=False)].reset_index(drop=True)
+            if display_cgt.empty:
+                st.warning("⚠️ No matching stock symbol found")
+
+        ch1, ch2, ch3, ch4, ch5, ch6, ch7 = st.columns([0.7, 1.3, 1.8, 1.2, 1.1, 1.3, 0.8])
+        ch1.markdown("**#**")
+        ch2.markdown("**Symbol**")
+        ch3.markdown("**Company**")
+        ch4.markdown("**Date**")
+        ch5.markdown("**Shares**")
+        ch6.markdown("**Tax Deducted**")
+        ch7.markdown("**Action**")
+
+        for idx, item in display_cgt.iterrows():
+            item_id = item["id"]
+            seq_num = idx + 1
+            cc1, cc2, cc3, cc4, cc5, cc6, cc7 = st.columns([0.7, 1.3, 1.8, 1.2, 1.1, 1.3, 0.8])
+            cc1.write(f"{seq_num}")
+            cc2.write(f"{item['symbol']}")
+            cc3.write(f"{item['stock_name']}")
+            cc4.write(f"{item['deduction_date']}")
+            cc5.write(f"{item['total_shares']:,.2f}")
+            cc6.write(f"{item['tax_amount']:,.2f}")
+            with cc7:
+                with st.popover("⋮"):
+                    if st.button("✏️ Edit", key=f"btn_edit_cgt_{item_id}", use_container_width=True):
+                        st.session_state.active_editing_id = item_id
+                    if st.button("🗑️ Delete", key=f"btn_del_cgt_{item_id}", use_container_width=True):
+                        supabase.table("cgt_deductions").delete().eq("id", item_id).execute()
+                        st.success(f"Deleted CGT Deduction Record #{seq_num}")
+                        st.rerun()
+
+            if st.session_state.active_editing_id == item_id:
+                with st.form(f"edit_form_cgt_{item_id}"):
+                    st.write(f"Editing CGT Deduction Record #{seq_num}")
+                    e_sym = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
+                    e_comp = st.text_input("Stock Company Name", value=item["stock_name"]).strip()
+                    e_date = st.date_input("Date of Deduction", value=pd.to_datetime(item["deduction_date"]).date())
+                    e_sh = st.number_input("Total Shares", value=float(item["total_shares"]), min_value=0.0001)
+                    e_tax = st.number_input("Tax Amount", value=float(item["tax_amount"]), min_value=0.01)
+                    e_note = st.text_input("Notes", value=item["notes"] or "")
+
+                    if st.form_submit_button("Save Changes", use_container_width=True):
+                        live_cash, _ = calculate_financials()
+                        delta_tax = float(e_tax) - float(item["tax_amount"])
+
+                        if delta_tax > live_cash:
+                            st.error(f"❌ Insufficient Free Cash! Extra tax: {CURRENCY} {delta_tax:,.2f} | Available: {CURRENCY} {live_cash:,.2f}. Free cash cannot go negative.")
+                        else:
+                            payload = {
+                                "symbol": e_sym,
+                                "stock_name": e_comp,
+                                "deduction_date": e_date.strftime("%Y-%m-%d"),
+                                "total_shares": float(e_sh),
+                                "tax_amount": round(float(e_tax), 2),
+                                "notes": e_note
+                            }
+                            supabase.table("cgt_deductions").update(payload).eq("id", item_id).execute()
+                            st.session_state.active_editing_id = None
+                            st.success("✅ CGT Deduction updated!")
+                            st.rerun()
+    else:
+        st.info("No CGT deductions recorded yet.")
 
 # DEPOSIT & WITHDRAWAL ENTRY
 elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
@@ -979,7 +1135,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         st.info(f"No {flow_kind.lower()} transactions recorded yet.")
 
 # ------------------------------------------------------------------------------
-# 11. REPORTING PAGES
+# 11. REPORTING PAGES (Including Holding Days & Profit/Loss %)
 # ------------------------------------------------------------------------------
 
 # WEEKLY SUMMARY
@@ -996,6 +1152,7 @@ elif st.session_state.current_page == "WEEKLY":
                 st.warning("⚠️ Ticker not available")
 
         if not sells_df.empty:
+            sells_df = enrich_sales_metrics(sells_df)
             sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
             sells_df["Mon_Start"] = sells_df["sale_dt"].apply(lambda d: d - pd.Timedelta(days=d.weekday()))
             sells_df["Fri_End"] = sells_df["Mon_Start"].apply(lambda d: d + pd.Timedelta(days=4))
@@ -1021,10 +1178,12 @@ elif st.session_state.current_page == "WEEKLY":
             report_df["#"] = range(1, len(target) + 1)
             report_df["Symbol"] = target["symbol"]
             report_df["Stock Name"] = target["stock_name"]
+            report_df["Days Held"] = target["days_held"].apply(lambda d: f"{d} days")
             report_df["Shares"] = target["shares_sold"].apply(lambda v: f"{v:,.2f}")
             report_df["Buy (Date @ Price)"] = target.apply(lambda r: f"{r['buy_date']} @ {r['buy_price']:,.2f}", axis=1)
             report_df["Sell (Date @ Price)"] = target.apply(lambda r: f"{r['sale_date']} @ {r['sale_price']:,.2f}", axis=1)
             report_df[f"Net Result ({CURRENCY})"] = target["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
+            report_df["Return %"] = target["pnl_pct"].apply(lambda p: f"{p:+.2f}%")
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
 
@@ -1042,6 +1201,7 @@ elif st.session_state.current_page == "MONTHLY":
                 st.warning("⚠️ Ticker not available")
 
         if not sells_df.empty:
+            sells_df = enrich_sales_metrics(sells_df)
             sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
             sells_df["Month_Display"] = sells_df["sale_dt"].dt.strftime("%B %Y")
             months = sells_df.sort_values(by="sale_dt", ascending=False)["Month_Display"].unique()
@@ -1064,10 +1224,12 @@ elif st.session_state.current_page == "MONTHLY":
             report_df["#"] = range(1, len(target_m) + 1)
             report_df["Symbol"] = target_m["symbol"]
             report_df["Stock Name"] = target_m["stock_name"]
+            report_df["Days Held"] = target_m["days_held"].apply(lambda d: f"{d} days")
             report_df["Shares"] = target_m["shares_sold"].apply(lambda v: f"{v:,.2f}")
             report_df["Buy (Date @ Price)"] = target_m.apply(lambda r: f"{r['buy_date']} @ {r['buy_price']:,.2f}", axis=1)
             report_df["Sell (Date @ Price)"] = target_m.apply(lambda r: f"{r['sale_date']} @ {r['sale_price']:,.2f}", axis=1)
             report_df[f"Net Result ({CURRENCY})"] = target_m["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
+            report_df["Return %"] = target_m["pnl_pct"].apply(lambda p: f"{p:+.2f}%")
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
 
@@ -1075,25 +1237,34 @@ elif st.session_state.current_page == "MONTHLY":
 elif st.session_state.current_page == "ANNUAL":
     st.header("🏆 Annual Performance (From Jan 1)")
     sells_df = load_sells()
-    if sells_df.empty:
-        st.info("No sales records available.")
+    cgt_ded_df = load_cgt_deductions()
+
+    if sells_df.empty and cgt_ded_df.empty:
+        st.info("No sales or tax records available.")
     else:
         y_sym = st.text_input("🔍 Search Stock Symbol by Prefix:", value="").strip().upper()
-        if y_sym:
+        if y_sym and not sells_df.empty:
             sells_df = sells_df[sells_df["symbol"].str.startswith(y_sym, na=False)]
-            if sells_df.empty:
-                st.warning("⚠️ Ticker not available")
 
         if not sells_df.empty:
+            sells_df = enrich_sales_metrics(sells_df)
             sells_df["sale_dt"] = pd.to_datetime(sells_df["sale_date"])
             years = sorted(sells_df["sale_dt"].dt.year.unique(), reverse=True)
             chosen_y = st.selectbox("Select Calendar Year:", years)
             yr_df = sells_df[sells_df["sale_dt"].dt.year == chosen_y].sort_values(by="id", ascending=False).reset_index(drop=True)
 
+            standalone_yr_tax = 0.0
+            if not cgt_ded_df.empty:
+                cgt_ded_df["ded_dt"] = pd.to_datetime(cgt_ded_df["deduction_date"])
+                standalone_yr_tax = cgt_ded_df[cgt_ded_df["ded_dt"].dt.year == chosen_y]["tax_amount"].sum()
+
+            tot_annual_tax = yr_df["cgt_tax"].sum() + standalone_yr_tax
+            tot_annual_net = yr_df["net_pnl"].sum() - standalone_yr_tax
+
             c1, c2, c3 = st.columns(3)
-            c1.metric(f"Gross P&L (Jan 1 – Dec 31, {chosen_y})", f"{CURRENCY} {yr_df['gross_pnl'].sum():,.2f}")
-            c2.metric("Total CGT Deducted", f"{CURRENCY} {yr_df['cgt_tax'].sum():,.2f}")
-            c3.metric("Net Realized Gain/Loss", f"{CURRENCY} {yr_df['net_pnl'].sum():,.2f}")
+            c1.metric(f"Gross P&L ({chosen_y})", f"{CURRENCY} {yr_df['gross_pnl'].sum():,.2f}")
+            c2.metric("Total CGT Deducted", f"{CURRENCY} {tot_annual_tax:,.2f}")
+            c3.metric("Net Realized Gain/Loss", f"{CURRENCY} {tot_annual_net:,.2f}")
 
             st.write("---")
 
@@ -1101,37 +1272,62 @@ elif st.session_state.current_page == "ANNUAL":
             report_df["#"] = range(1, len(yr_df) + 1)
             report_df["Symbol"] = yr_df["symbol"]
             report_df["Stock Name"] = yr_df["stock_name"]
+            report_df["Days Held"] = yr_df["days_held"].apply(lambda d: f"{d} days")
             report_df["Shares"] = yr_df["shares_sold"].apply(lambda v: f"{v:,.2f}")
             report_df["Buy (Date @ Price)"] = yr_df.apply(lambda r: f"{r['buy_date']} @ {r['buy_price']:,.2f}", axis=1)
             report_df["Sell (Date @ Price)"] = yr_df.apply(lambda r: f"{r['sale_date']} @ {r['sale_price']:,.2f}", axis=1)
             report_df[f"Net Result ({CURRENCY})"] = yr_df["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
+            report_df["Return %"] = yr_df["pnl_pct"].apply(lambda p: f"{p:+.2f}%")
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
 
-# CAPITAL GAIN TAX
+# CAPITAL GAIN TAX LEDGER (COMBINING SALE CGT & STANDALONE CGT DEDUCTIONS)
 elif st.session_state.current_page == "CGT":
     st.header("📊 Capital Gains Tax Ledger")
     sells_df = load_sells()
-    if sells_df.empty:
+    cgt_ded_df = load_cgt_deductions()
+
+    if sells_df.empty and cgt_ded_df.empty:
         st.info("No tax records logged.")
     else:
         t_sym = st.text_input("🔍 Search Stock Symbol by Prefix:", value="").strip().upper()
-        if t_sym:
-            sells_df = sells_df[sells_df["symbol"].str.startswith(t_sym, na=False)]
-            if sells_df.empty:
-                st.warning("⚠️ Ticker not available")
-
+        
         if not sells_df.empty:
-            cgt_data = sells_df.sort_values(by="id", ascending=False).reset_index(drop=True)
-            cgt_df = pd.DataFrame()
-            cgt_df["#"] = range(1, len(cgt_data) + 1)
-            cgt_df["Stock Symbol"] = cgt_data["symbol"]
-            cgt_df[f"Buy Price ({CURRENCY})"] = cgt_data["buy_price"].apply(lambda v: f"{v:,.2f}")
-            cgt_df[f"Sell Price ({CURRENCY})"] = cgt_data["sale_price"].apply(lambda v: f"{v:,.2f}")
-            cgt_df["Buy Date"] = cgt_data["buy_date"]
-            cgt_df["Sell Date"] = cgt_data["sale_date"]
-            cgt_df["% Tax Deduction"] = cgt_data["cgt_rate"].apply(lambda v: f"{v}%")
-            cgt_df[f"Capital Gain Tax ({CURRENCY})"] = cgt_data["cgt_tax"].apply(lambda v: f"{v:,.2f}")
-            cgt_df[f"Net P&L ({CURRENCY})"] = cgt_data["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
+            st.subheader("1. Tax Deducted on Completed Sales")
+            s_filtered = sells_df.copy()
+            if t_sym:
+                s_filtered = s_filtered[s_filtered["symbol"].str.startswith(t_sym, na=False)]
+            
+            if not s_filtered.empty:
+                cgt_data = s_filtered.sort_values(by="id", ascending=False).reset_index(drop=True)
+                cgt_df = pd.DataFrame()
+                cgt_df["#"] = range(1, len(cgt_data) + 1)
+                cgt_df["Stock Symbol"] = cgt_data["symbol"]
+                cgt_df[f"Buy Price ({CURRENCY})"] = cgt_data["buy_price"].apply(lambda v: f"{v:,.2f}")
+                cgt_df[f"Sell Price ({CURRENCY})"] = cgt_data["sale_price"].apply(lambda v: f"{v:,.2f}")
+                cgt_df["Buy Date"] = cgt_data["buy_date"]
+                cgt_df["Sell Date"] = cgt_data["sale_date"]
+                cgt_df["% Tax Deduction"] = cgt_data["cgt_rate"].apply(lambda v: f"{v}%")
+                cgt_df[f"Capital Gain Tax ({CURRENCY})"] = cgt_data["cgt_tax"].apply(lambda v: f"{v:,.2f}")
+                cgt_df[f"Net P&L ({CURRENCY})"] = cgt_data["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
 
-            st.dataframe(cgt_df, use_container_width=True, hide_index=True)
+                st.dataframe(cgt_df, use_container_width=True, hide_index=True)
+
+        if not cgt_ded_df.empty:
+            st.subheader("2. Standalone Capital Gain Tax Deductions")
+            d_filtered = cgt_ded_df.copy()
+            if t_sym:
+                d_filtered = d_filtered[d_filtered["symbol"].str.startswith(t_sym, na=False)]
+
+            if not d_filtered.empty:
+                d_data = d_filtered.sort_values(by="id", ascending=False).reset_index(drop=True)
+                ded_df = pd.DataFrame()
+                ded_df["#"] = range(1, len(d_data) + 1)
+                ded_df["Stock Symbol"] = d_data["symbol"]
+                ded_df["Stock Company"] = d_data["stock_name"]
+                ded_df["Deduction Date"] = d_data["deduction_date"]
+                ded_df["Total Shares"] = d_data["total_shares"].apply(lambda v: f"{v:,.2f}")
+                ded_df[f"Tax Deducted ({CURRENCY})"] = d_data["tax_amount"].apply(lambda v: f"{v:,.2f}")
+                ded_df["Notes"] = d_data["notes"].fillna("-")
+
+                st.dataframe(ded_df, use_container_width=True, hide_index=True)
