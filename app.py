@@ -450,7 +450,7 @@ def calculate_financials():
 
     return free_cash, total_equity
 
-# Helper: Calculate Holding Days, Return %, Profit Per Day & Profit Per Month
+# Helper: Calculate Holding Days, Return %, Profit Per Day, Profit Per Month & Monthly %
 def enrich_sales_metrics(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -459,13 +459,17 @@ def enrich_sales_metrics(df: pd.DataFrame) -> pd.DataFrame:
     sale_dt = pd.to_datetime(df["sale_date"], errors="coerce")
     df["days_held"] = (sale_dt - buy_dt).dt.days.fillna(0).astype(int)
     
-    # Effective holding days for rate calculations (at least 1 day if bought and sold same day)
+    # Effective holding days for rate calculations (minimum 1 day if bought & sold same day)
     effective_days = df["days_held"].apply(lambda d: max(1, d))
     df["profit_per_day"] = df["net_pnl"] / effective_days
     df["profit_per_month"] = df["profit_per_day"] * 30.0
     
     df["pnl_pct"] = df.apply(
         lambda r: ((r["net_pnl"] / (r["shares_sold"] * r["buy_price"])) * 100.0) if (r["shares_sold"] * r["buy_price"]) > 0 else 0.0,
+        axis=1
+    )
+    df["monthly_pnl_pct"] = df.apply(
+        lambda r: ((r["profit_per_month"] / (r["shares_sold"] * r["buy_price"])) * 100.0) if (r["shares_sold"] * r["buy_price"]) > 0 else 0.0,
         axis=1
     )
     return df
@@ -1193,7 +1197,7 @@ elif st.session_state.current_page == "WEEKLY":
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
 
-# MONTHLY SUMMARY (With Per-Day Profit, Per-Month Profit & Total Profit)
+# MONTHLY SUMMARY (Profit / Month includes Monthly Return % in brackets)
 elif st.session_state.current_page == "MONTHLY":
     st.header("🗓️ Monthly Summary (1st to Last Day)")
     sells_df = load_sells()
@@ -1222,7 +1226,6 @@ elif st.session_state.current_page == "MONTHLY":
             avg_per_day_profit = m_total_profit / tot_holding_days
             avg_per_month_profit = avg_per_day_profit * 30.0
 
-            # Top Summary Metrics
             mk1, mk2, mk3 = st.columns(3)
             mk1.metric("Gross P&L", f"{CURRENCY} {m_gross:,.2f}")
             mk2.metric("CGT Deducted", f"{CURRENCY} {m_tax:,.2f}")
@@ -1235,7 +1238,6 @@ elif st.session_state.current_page == "MONTHLY":
 
             st.write("---")
 
-            # Bordered Monthly Table with Per-Day, Per-Month & Total Profit
             report_df = pd.DataFrame()
             report_df["#"] = range(1, len(target_m) + 1)
             report_df["Symbol"] = target_m["symbol"]
@@ -1245,7 +1247,10 @@ elif st.session_state.current_page == "MONTHLY":
             report_df["Buy (Date @ Price)"] = target_m.apply(lambda r: f"{r['buy_date']} @ {r['buy_price']:,.2f}", axis=1)
             report_df["Sell (Date @ Price)"] = target_m.apply(lambda r: f"{r['sale_date']} @ {r['sale_price']:,.2f}", axis=1)
             report_df[f"Profit / Day ({CURRENCY})"] = target_m["profit_per_day"].apply(lambda v: f"{v:,.2f}")
-            report_df[f"Profit / Month ({CURRENCY})"] = target_m["profit_per_month"].apply(lambda v: f"{v:,.2f}")
+            report_df[f"Profit / Month ({CURRENCY})"] = target_m.apply(
+                lambda r: f"{r['profit_per_month']:,.2f} ({r['monthly_pnl_pct']:+.2f}%)",
+                axis=1
+            )
             report_df[f"Total Profit ({CURRENCY})"] = target_m["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
             report_df["Return %"] = target_m["pnl_pct"].apply(lambda p: f"{p:+.2f}%")
 
