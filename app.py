@@ -450,6 +450,23 @@ def calculate_financials():
 
     return free_cash, total_equity
 
+# Helper: Revert Sell Record (Restores shares back to parent buy_order & reverses cash/equity)
+def revert_and_delete_sell(sell_row):
+    sell_id = int(sell_row["id"])
+    buy_id = sell_row.get("buy_order_id")
+    shares_sold = float(sell_row["shares_sold"])
+
+    if buy_id is not None and pd.notna(buy_id):
+        buy_res = supabase.table("buy_orders").select("shares_bought, shares_remaining").eq("id", int(buy_id)).execute()
+        if buy_res.data:
+            parent_buy = buy_res.data[0]
+            max_shares = float(parent_buy["shares_bought"])
+            curr_rem = float(parent_buy["shares_remaining"])
+            restored_rem = min(max_shares, curr_rem + shares_sold)
+            supabase.table("buy_orders").update({"shares_remaining": restored_rem}).eq("id", int(buy_id)).execute()
+
+    supabase.table("sell_orders").delete().eq("id", sell_id).execute()
+
 # Helper: Calculate Holding Days, Return %, Profit Per Day, Profit Per Month & Monthly %
 def enrich_sales_metrics(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -654,6 +671,7 @@ if st.session_state.current_page == "PURCHASE":
     search_p = st.text_input("🔍 Search Purchase by Symbol (e.g., B, BA):", key="search_p_sym", value="").strip().upper()
     
     buys_all = load_buys()
+    sells_all_for_check = load_sells()
     if not buys_all.empty:
         display_buys = buys_all.sort_values(by="id", ascending=False).reset_index(drop=True)
         if search_p:
@@ -671,7 +689,7 @@ if st.session_state.current_page == "PURCHASE":
         h7.markdown("**Action**")
 
         for idx, item in display_buys.iterrows():
-            item_id = item["id"]
+            item_id = int(item["id"])
             seq_num = idx + 1
             c1, c2, c3, c4, c5, c6, c7 = st.columns([0.8, 1.5, 1.2, 1.2, 1.2, 1.3, 0.8])
             c1.write(f"{seq_num}")
@@ -685,9 +703,13 @@ if st.session_state.current_page == "PURCHASE":
                     if st.button("✏️ Edit", key=f"btn_edit_buy_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_buy_{item_id}", use_container_width=True):
-                        supabase.table("buy_orders").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted Purchase Record #{seq_num}")
-                        st.rerun()
+                        linked_sales = sells_all_for_check[sells_all_for_check["buy_order_id"] == item_id] if not sells_all_for_check.empty and "buy_order_id" in sells_all_for_check.columns else pd.DataFrame()
+                        if not linked_sales.empty:
+                            st.error(f"❌ Cannot delete Purchase #{seq_num}! {len(linked_sales)} sale record(s) are linked to this lot. Delete the linked sale record(s) first so holdings and P&L revert cleanly.")
+                        else:
+                            supabase.table("buy_orders").delete().eq("id", item_id).execute()
+                            st.success(f"✅ Deleted Purchase #{seq_num} and reverted Free Cash & Holdings!")
+                            st.rerun()
 
             if st.session_state.active_editing_id == item_id:
                 with st.form(f"edit_form_buy_{item_id}"):
@@ -705,11 +727,13 @@ if st.session_state.current_page == "PURCHASE":
                         old_tot = float(item["total_cost"])
                         delta_cost = new_tot - old_tot
                         curr_free_cash, _ = calculate_financials()
+                        sold_shares = float(item["shares_bought"]) - float(item["shares_remaining"])
 
-                        if delta_cost > curr_free_cash:
+                        if sh_val < sold_shares:
+                            st.error(f"❌ Shares Bought ({sh_val:,.2f}) cannot be less than shares already sold ({sold_shares:,.2f})!")
+                        elif delta_cost > curr_free_cash:
                             st.error(f"❌ Insufficient Free Cash! Extra cost: {CURRENCY} {delta_cost:,.2f} | Available: {CURRENCY} {curr_free_cash:,.2f}. Free cash cannot go negative.")
                         else:
-                            sold_shares = float(item["shares_bought"]) - float(item["shares_remaining"])
                             new_remaining = max(0.0, sh_val - sold_shares)
 
                             payload = {
@@ -725,7 +749,7 @@ if st.session_state.current_page == "PURCHASE":
                             }
                             supabase.table("buy_orders").update(payload).eq("id", item_id).execute()
                             st.session_state.active_editing_id = None
-                            st.success("✅ Purchase updated successfully!")
+                            st.success("✅ Purchase updated & holdings/cash recalculated!")
                             st.rerun()
     else:
         st.info("No purchases recorded yet.")
@@ -851,7 +875,7 @@ elif st.session_state.current_page == "SELL":
         sh8.markdown("**Action**")
 
         for idx, item in display_sells.iterrows():
-            item_id = item["id"]
+            item_id = int(item["id"])
             seq_num = idx + 1
             sc1, sc2, sc3, sc4, sc5, sc6, sc7, sc8 = st.columns([0.6, 1.2, 1.1, 0.9, 1.1, 1.2, 1.0, 0.7])
             sc1.write(f"{seq_num}")
@@ -866,8 +890,8 @@ elif st.session_state.current_page == "SELL":
                     if st.button("✏️ Edit", key=f"btn_edit_sell_{item_id}", use_container_width=True):
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_sell_{item_id}", use_container_width=True):
-                        supabase.table("sell_orders").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted Sell Record #{seq_num}")
+                        revert_and_delete_sell(item)
+                        st.success(f"✅ Deleted Sell Record #{seq_num} & restored shares to Holdings, Free Cash & Equity!")
                         st.rerun()
 
             if st.session_state.active_editing_id == item_id:
@@ -876,33 +900,52 @@ elif st.session_state.current_page == "SELL":
                     ss_sym = st.text_input("Stock Symbol", value=item["symbol"]).strip().upper()
                     ss_name = st.text_input("Stock Name", value=item["stock_name"]).strip()
                     ss_date = st.date_input("Sale Date", value=pd.to_datetime(item["sale_date"]).date())
-                    ss_sh = st.number_input("Shares Sold", value=float(item["shares_sold"]))
-                    ss_sp = st.number_input("Sale Price", value=float(item["sale_price"]))
-                    ss_bp = st.number_input("Buy Price Basis", value=float(item["buy_price"]))
-                    ss_fe = st.number_input("Selling Fees", value=float(item["selling_fees"]))
-                    ss_rt = st.number_input("CGT Rate %", value=float(item["cgt_rate"]))
+                    ss_sh = st.number_input("Shares Sold", value=float(item["shares_sold"]), min_value=0.0001)
+                    ss_sp = st.number_input("Sale Price", value=float(item["sale_price"]), min_value=0.01)
+                    ss_bp = st.number_input("Buy Price Basis", value=float(item["buy_price"]), min_value=0.01)
+                    ss_fe = st.number_input("Selling Fees", value=float(item["selling_fees"]), min_value=0.0)
+                    ss_rt = st.number_input("CGT Rate %", value=float(item["cgt_rate"]), min_value=0.0)
 
                     if st.form_submit_button("Save Changes", use_container_width=True):
-                        gross = (ss_sh * ss_sp) - (ss_sh * ss_bp) - ss_fe
-                        cgt = (gross * (ss_rt / 100.0)) if gross > 0 else 0.0
-                        net = gross - cgt
-                        payload = {
-                            "symbol": ss_sym,
-                            "stock_name": ss_name,
-                            "sale_date": ss_date.strftime("%Y-%m-%d"),
-                            "shares_sold": float(ss_sh),
-                            "sale_price": float(ss_sp),
-                            "buy_price": float(ss_bp),
-                            "selling_fees": float(ss_fe),
-                            "gross_pnl": round(float(gross), 2),
-                            "cgt_rate": float(ss_rt),
-                            "cgt_tax": round(float(cgt), 2),
-                            "net_pnl": round(float(net), 2)
-                        }
-                        supabase.table("sell_orders").update(payload).eq("id", item_id).execute()
-                        st.session_state.active_editing_id = None
-                        st.success("✅ Sell record updated!")
-                        st.rerun()
+                        old_sh = float(item["shares_sold"])
+                        delta_sh = float(ss_sh) - old_sh
+                        buy_id = item.get("buy_order_id")
+                        can_update = True
+
+                        if buy_id is not None and pd.notna(buy_id) and delta_sh != 0:
+                            buy_res = supabase.table("buy_orders").select("shares_bought, shares_remaining").eq("id", int(buy_id)).execute()
+                            if buy_res.data:
+                                p_buy = buy_res.data[0]
+                                curr_rem = float(p_buy["shares_remaining"])
+                                max_b = float(p_buy["shares_bought"])
+                                new_rem = curr_rem - delta_sh
+                                if new_rem < 0:
+                                    st.error(f"❌ Cannot increase sold shares by {delta_sh:,.2f}! Only {curr_rem:,.2f} remaining in parent buy lot.")
+                                    can_update = False
+                                else:
+                                    supabase.table("buy_orders").update({"shares_remaining": min(max_b, new_rem)}).eq("id", int(buy_id)).execute()
+
+                        if can_update:
+                            gross = (ss_sh * ss_sp) - (ss_sh * ss_bp) - ss_fe
+                            cgt = (gross * (ss_rt / 100.0)) if gross > 0 else 0.0
+                            net = gross - cgt
+                            payload = {
+                                "symbol": ss_sym,
+                                "stock_name": ss_name,
+                                "sale_date": ss_date.strftime("%Y-%m-%d"),
+                                "shares_sold": float(ss_sh),
+                                "sale_price": float(ss_sp),
+                                "buy_price": float(ss_bp),
+                                "selling_fees": float(ss_fe),
+                                "gross_pnl": round(float(gross), 2),
+                                "cgt_rate": float(ss_rt),
+                                "cgt_tax": round(float(cgt), 2),
+                                "net_pnl": round(float(net), 2)
+                            }
+                            supabase.table("sell_orders").update(payload).eq("id", item_id).execute()
+                            st.session_state.active_editing_id = None
+                            st.success("✅ Sell record updated & Holdings/Cash/Equity synchronized!")
+                            st.rerun()
     else:
         st.info("No completed sales recorded yet.")
 
@@ -980,7 +1023,7 @@ elif st.session_state.current_page == "ADD_CGT_DEDUCTION":
         ch7.markdown("**Action**")
 
         for idx, item in display_cgt.iterrows():
-            item_id = item["id"]
+            item_id = int(item["id"])
             seq_num = idx + 1
             cc1, cc2, cc3, cc4, cc5, cc6, cc7 = st.columns([0.7, 1.3, 1.8, 1.2, 1.1, 1.3, 0.8])
             cc1.write(f"{seq_num}")
@@ -995,7 +1038,7 @@ elif st.session_state.current_page == "ADD_CGT_DEDUCTION":
                         st.session_state.active_editing_id = item_id
                     if st.button("🗑️ Delete", key=f"btn_del_cgt_{item_id}", use_container_width=True):
                         supabase.table("cgt_deductions").delete().eq("id", item_id).execute()
-                        st.success(f"Deleted CGT Deduction Record #{seq_num}")
+                        st.success(f"✅ Deleted CGT Deduction #{seq_num} & refunded {CURRENCY} {float(item['tax_amount']):,.2f} to Free Cash & Equity!")
                         st.rerun()
 
             if st.session_state.active_editing_id == item_id:
@@ -1025,7 +1068,7 @@ elif st.session_state.current_page == "ADD_CGT_DEDUCTION":
                             }
                             supabase.table("cgt_deductions").update(payload).eq("id", item_id).execute()
                             st.session_state.active_editing_id = None
-                            st.success("✅ CGT Deduction updated!")
+                            st.success("✅ CGT Deduction updated & Free Cash/Equity recalculated!")
                             st.rerun()
     else:
         st.info("No CGT deductions recorded yet.")
@@ -1097,7 +1140,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         ch5.markdown("**Action**")
 
         for idx, item in filtered_cf.iterrows():
-            item_id = item["id"]
+            item_id = int(item["id"])
             seq_num = idx + 1
             cc1, cc2, cc3, cc4, cc5 = st.columns([0.8, 1.5, 1.5, 2, 0.8])
             cc1.write(f"{seq_num}")
@@ -1113,7 +1156,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
                             st.error(f"❌ Cannot delete this deposit! Free cash would become negative ({CURRENCY} {free_cash - float(item['amount']):,.2f}).")
                         else:
                             supabase.table("cash_flows").delete().eq("id", item_id).execute()
-                            st.success(f"Deleted {flow_kind.capitalize()} Record #{seq_num}")
+                            st.success(f"✅ Deleted {flow_kind.capitalize()} #{seq_num} & reverted Free Cash & Equity!")
                             st.rerun()
 
             if st.session_state.active_editing_id == item_id:
@@ -1139,7 +1182,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
                             }
                             supabase.table("cash_flows").update(payload).eq("id", item_id).execute()
                             st.session_state.active_editing_id = None
-                            st.success(f"✅ {flow_kind.capitalize()} updated!")
+                            st.success(f"✅ {flow_kind.capitalize()} updated & Free Cash/Equity recalculated!")
                             st.rerun()
     else:
         st.info(f"No {flow_kind.lower()} transactions recorded yet.")
