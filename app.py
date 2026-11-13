@@ -450,7 +450,7 @@ def calculate_financials():
 
     return free_cash, total_equity
 
-# Helper: Calculate Holding Days & Return %
+# Helper: Calculate Holding Days, Return %, Profit Per Day & Profit Per Month
 def enrich_sales_metrics(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -459,8 +459,15 @@ def enrich_sales_metrics(df: pd.DataFrame) -> pd.DataFrame:
     sale_dt = pd.to_datetime(df["sale_date"], errors="coerce")
     df["days_held"] = (sale_dt - buy_dt).dt.days.fillna(0).astype(int)
     
-    cost_basis = df["shares_sold"] * df["buy_price"]
-    df["pnl_pct"] = df.apply(lambda r: ((r["net_pnl"] / (r["shares_sold"] * r["buy_price"])) * 100.0) if (r["shares_sold"] * r["buy_price"]) > 0 else 0.0, axis=1)
+    # Effective holding days for rate calculations (at least 1 day if bought and sold same day)
+    effective_days = df["days_held"].apply(lambda d: max(1, d))
+    df["profit_per_day"] = df["net_pnl"] / effective_days
+    df["profit_per_month"] = df["profit_per_day"] * 30.0
+    
+    df["pnl_pct"] = df.apply(
+        lambda r: ((r["net_pnl"] / (r["shares_sold"] * r["buy_price"])) * 100.0) if (r["shares_sold"] * r["buy_price"]) > 0 else 0.0,
+        axis=1
+    )
     return df
 
 # ------------------------------------------------------------------------------
@@ -719,7 +726,7 @@ if st.session_state.current_page == "PURCHASE":
     else:
         st.info("No purchases recorded yet.")
 
-# SELL ENTRY (Calculates Holding Days & P&L % Automatically)
+# SELL ENTRY
 elif st.session_state.current_page == "SELL":
     st.header("➖ Sell Record Entry")
     buys_df = load_buys()
@@ -782,7 +789,6 @@ elif st.session_state.current_page == "SELL":
                             lot_tax = (lot_gross_pnl * (val_cgt_rate / 100.0)) if lot_gross_pnl > 0 else 0.0
                             lot_net_pnl = lot_gross_pnl - lot_tax
 
-                            # Calculate holding duration in days
                             buy_dt = pd.to_datetime(lot_row["purchase_date"]).date()
                             days_held = max(0, (s_date - buy_dt).days)
                             max_days_held = max(max_days_held, days_held)
@@ -896,7 +902,7 @@ elif st.session_state.current_page == "SELL":
     else:
         st.info("No completed sales recorded yet.")
 
-# NEW FUNCTION: ADD CAPITAL GAIN TAX DEDUCTION
+# ADD CAPITAL GAIN TAX DEDUCTION
 elif st.session_state.current_page == "ADD_CGT_DEDUCTION":
     st.header("🏛️ Add Capital Gain Tax Deduction")
     free_cash, _ = calculate_financials()
@@ -1135,7 +1141,7 @@ elif st.session_state.current_page in ["DEPOSIT", "WITHDRAWAL"]:
         st.info(f"No {flow_kind.lower()} transactions recorded yet.")
 
 # ------------------------------------------------------------------------------
-# 11. REPORTING PAGES (Including Holding Days & Profit/Loss %)
+# 11. REPORTING PAGES
 # ------------------------------------------------------------------------------
 
 # WEEKLY SUMMARY
@@ -1187,7 +1193,7 @@ elif st.session_state.current_page == "WEEKLY":
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
 
-# MONTHLY SUMMARY
+# MONTHLY SUMMARY (With Per-Day Profit, Per-Month Profit & Total Profit)
 elif st.session_state.current_page == "MONTHLY":
     st.header("🗓️ Monthly Summary (1st to Last Day)")
     sells_df = load_sells()
@@ -1211,15 +1217,25 @@ elif st.session_state.current_page == "MONTHLY":
 
             m_gross = target_m["gross_pnl"].sum()
             m_tax = target_m["cgt_tax"].sum()
-            m_net = target_m["net_pnl"].sum()
+            m_total_profit = target_m["net_pnl"].sum()
+            tot_holding_days = max(1, target_m["days_held"].sum())
+            avg_per_day_profit = m_total_profit / tot_holding_days
+            avg_per_month_profit = avg_per_day_profit * 30.0
 
+            # Top Summary Metrics
             mk1, mk2, mk3 = st.columns(3)
             mk1.metric("Gross P&L", f"{CURRENCY} {m_gross:,.2f}")
             mk2.metric("CGT Deducted", f"{CURRENCY} {m_tax:,.2f}")
-            mk3.metric("Net Realized Gain/Loss", f"{CURRENCY} {m_net:,.2f}")
+            mk3.metric("Total Profit (Net P&L)", f"{CURRENCY} {m_total_profit:,.2f}")
+
+            mk4, mk5, mk6 = st.columns(3)
+            mk4.metric("Total Holding Days", f"{target_m['days_held'].sum():,} days")
+            mk5.metric("Profit / Day", f"{CURRENCY} {avg_per_day_profit:,.2f}")
+            mk6.metric("Profit / Month (30d Basis)", f"{CURRENCY} {avg_per_month_profit:,.2f}")
 
             st.write("---")
 
+            # Bordered Monthly Table with Per-Day, Per-Month & Total Profit
             report_df = pd.DataFrame()
             report_df["#"] = range(1, len(target_m) + 1)
             report_df["Symbol"] = target_m["symbol"]
@@ -1228,7 +1244,9 @@ elif st.session_state.current_page == "MONTHLY":
             report_df["Shares"] = target_m["shares_sold"].apply(lambda v: f"{v:,.2f}")
             report_df["Buy (Date @ Price)"] = target_m.apply(lambda r: f"{r['buy_date']} @ {r['buy_price']:,.2f}", axis=1)
             report_df["Sell (Date @ Price)"] = target_m.apply(lambda r: f"{r['sale_date']} @ {r['sale_price']:,.2f}", axis=1)
-            report_df[f"Net Result ({CURRENCY})"] = target_m["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
+            report_df[f"Profit / Day ({CURRENCY})"] = target_m["profit_per_day"].apply(lambda v: f"{v:,.2f}")
+            report_df[f"Profit / Month ({CURRENCY})"] = target_m["profit_per_month"].apply(lambda v: f"{v:,.2f}")
+            report_df[f"Total Profit ({CURRENCY})"] = target_m["net_pnl"].apply(lambda v: f"{'🟢' if v >= 0 else '🔴'} {v:,.2f}")
             report_df["Return %"] = target_m["pnl_pct"].apply(lambda p: f"{p:+.2f}%")
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
@@ -1281,7 +1299,7 @@ elif st.session_state.current_page == "ANNUAL":
 
             st.dataframe(report_df, use_container_width=True, hide_index=True)
 
-# CAPITAL GAIN TAX LEDGER (COMBINING SALE CGT & STANDALONE CGT DEDUCTIONS)
+# CAPITAL GAIN TAX LEDGER
 elif st.session_state.current_page == "CGT":
     st.header("📊 Capital Gains Tax Ledger")
     sells_df = load_sells()
